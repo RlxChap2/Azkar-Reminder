@@ -1,0 +1,101 @@
+; AzkarReminder.iss — Inno Setup 6 installer script
+;
+; HOW TO BUILD:
+;   1. Install Inno Setup 6 (https://jrsoftware.org/isinfo.php)
+;   2. Build the Release EXE first:
+;        cmake --build build --config Release
+;   3. Compile this script:
+;        iscc installer\AzkarReminder.iss
+;   4. Output: release\AzkarReminder-Setup-v1.1.0.exe
+;
+; RELEASE WORKFLOW:
+;   1. Bump #define AppVersion below (e.g. 1.1.0)
+;   2. Bump FILEVERSION in DhikrReminder.rc to match
+;   3. Bump kVersion in src/core/ApplicationMetadata.h to match
+;   4. Run scripts\build_release.bat
+;   5. Create GitHub Release tag v1.1.0
+;   6. Upload release\AzkarReminder-Setup-v1.1.0.exe as the release asset
+
+#define AppName        "Azkar Reminder"
+#define AppVersion     "1.1.0"
+#define AppPublisher   "Ahmed Mohamed Kamel"
+#define AppURL         "https://github.com/kamah/dhikr-reminder"
+#define AppId          "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+#define AppUserModelID "AhmedMohamedKamel.AzkarReminder"
+#define SourceExe      "..\build\bin\Release\AzkarReminder.exe"
+
+[Setup]
+AppId={{#AppId}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppPublisher={#AppPublisher}
+AppPublisherURL={#AppURL}
+AppSupportURL={#AppURL}/issues
+AppUpdatesURL={#AppURL}/releases
+DefaultDirName={autopf}\{#AppName}
+DefaultGroupName={#AppName}
+AllowNoIcons=yes
+OutputDir=..\release
+OutputBaseFilename=AzkarReminder-Setup-v1.1.0
+Compression=lzma2/ultra64
+SolidCompression=yes
+MinVersion=10.0
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=commandline dialog
+UsedUserAreasWarning=no
+UninstallDisplayName={#AppName}
+UninstallDisplayIcon={app}\AzkarReminder.exe,0
+SetupIconFile=..\assets\icons\app.ico
+CloseApplications=yes
+CloseApplicationsFilter=AzkarReminder.exe,DhikrReminder.exe
+RestartApplications=yes
+WizardStyle=modern
+VersionInfoVersion={#AppVersion}
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription={#AppName} Setup
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoCopyright=Copyright © 2026 {#AppPublisher}
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\audio\*"; DestDir: "{app}\audio"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\{#AppName}";           Filename: "{app}\AzkarReminder.exe"; IconFilename: "{app}\AzkarReminder.exe"; IconIndex: 0; AppUserModelID: "{#AppUserModelID}"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#AppName}";     Filename: "{app}\AzkarReminder.exe"; IconFilename: "{app}\AzkarReminder.exe"; IconIndex: 0; AppUserModelID: "{#AppUserModelID}"; Tasks: desktopicon
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "AzkarReminder"; Flags: uninsdeletevalue
+
+[Run]
+Filename: "{app}\AzkarReminder.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent unchecked
+
+[UninstallRun]
+Filename: "{app}\AzkarReminder.exe"; Parameters: "--quit"; RunOnceId: "AzkarReminderQuit"; Flags: runhidden skipifdoesntexist
+
+[Code]
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  ShellExec('', 'taskkill', '/F /IM AzkarReminder.exe /IM DhikrReminder.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  ShellExec('', 'taskkill', '/F /IM AzkarReminder.exe /IM DhikrReminder.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;

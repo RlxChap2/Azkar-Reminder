@@ -1,0 +1,58 @@
+// DhikrReminder.rc - Windows resource script
+#include "src/resource.h"
+#include <winres.h>
+
+// Application manifest (handled by MSVC / CMake)
+// CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "DhikrReminder.exe.manifest"
+
+// Application icons
+IDI_APP_ICON       ICON "assets/icons/app.ico"
+IDI_APP_ICON_SMALL ICON "assets/icons/app_small.ico"
+
+// Embedded static visual assets & data
+IDR_LOGO           RCDATA "assets/images/logo.png"
+IDR_CONTENT_MD     RCDATA "assets/content.md"
+
+// Version information
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    1,1,0,0
+PRODUCTVERSION 1,1,0,0
+FILEFLAGSMASK  0x3fL
+FILEFLAGS      0x0L
+FILEOS         VOS__WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",     "Ahmed Mohamed Kamel"
+            VALUE "FileDescription", "Azkar Reminder"
+            VALUE "FileVersion",     "1.1.0.0"
+            VALUE "InternalName",    "AzkarReminder"
+            VALUE "LegalCopyright",  "Copyright © 2026 Ahmed Mohamed Kamel"
+            VALUE "OriginalFilename","AzkarReminder.exe"
+            VALUE "ProductName",     "Azkar Reminder"
+            VALUE "ProductVersion",  "1.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+// Onboarding dialog
+IDD_ONBOARDING DIALOGEX 0, 0, 340, 220
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Azkar Reminder - Setup"
+FONT 10, "Noto Sans", 400, 0, 0x1
+BEGIN
+    LTEXT       "", IDC_ONBOARD_TITLE, 20, 14, 300, 18, SS_NOPREFIX
+    LTEXT       "", IDC_ONBOARD_BODY,  20, 40, 300, 100, SS_NOPREFIX
+    LTEXT       "", IDC_ONBOARD_FILE_LABEL, 20, 150, 300, 12
+    PUSHBUTTON  "Browse...", IDC_ONBOARD_BROWSE, 20, 165, 70, 14
+    PUSHBUTTON  "<- Back",   IDC_ONBOARD_BACK,   200, 196, 60, 14
+    DEFPUSHBUTTON "Next ->",  IDC_ONBOARD_NEXT,   268, 196, 60, 14
+END

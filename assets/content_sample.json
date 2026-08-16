@@ -1,0 +1,29 @@
+{
+  "_comment": "Azkar Reminder — Content File Schema Documentation",
+  "_note": "This file defines the required JSON structure for the content file.",
+  "_important": "DO NOT distribute this file as-is. This is a structural example only.",
+
+  "version": "1.0",
+  "items": [
+    {
+      "id": "example-001",
+      "category": "dhikr",
+      "text": "[Place Arabic text here]",
+      "transliteration": "[Optional romanization]",
+      "description": "[Brief meaning or benefit]",
+      "source": "[Reference source]",
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "id": "example-002",
+      "category": "istighfar",
+      "text": "[Place Arabic text here]",
+      "transliteration": "[Optional romanization]",
+      "description": "[Brief meaning or benefit]",
+      "source": "[Reference source]",
+      "priority": 2,
+      "enabled": true
+    }
+  ]
+}
