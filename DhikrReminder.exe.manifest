@@ -6,6 +6,8 @@
     version="1.1.0.0"
     processorArchitecture="*"/>
 
+  <description>Azkar Reminder - An elegant desktop application to display Dhikr reminders over other windows</description>
+
   <!-- DPI awareness: per-monitor v2 -->
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>

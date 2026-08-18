@@ -56,10 +56,8 @@ MainWindow::~MainWindow() {
 bool MainWindow::Create(HINSTANCE hInstance) {
     m_hInst = hInstance;
 
-    HDC hdc = GetDC(nullptr);
-    float dpiX = (float)GetDeviceCaps(hdc, LOGPIXELSX);
-    ReleaseDC(nullptr, hdc);
-    m_dpiScale = dpiX / 96.f;
+    // Use GetDpiForSystem for initial metrics. We will refine it to GetDpiForWindow after HWND creation.
+    m_dpiScale = GetDpiForSystem() / 96.f;
 
     m_width  = (int)(820.f * m_dpiScale);
     m_height = (int)(560.f * m_dpiScale);
@@ -73,8 +71,8 @@ bool MainWindow::Create(HINSTANCE hInstance) {
     // Create popup window
     PopupWindow::Instance().Create(hInstance);
 
-    // Also trigger update check in background (10 minutes after startup)
-    Updater::Instance().CheckIfDue(m_hwnd);
+    // Request initial data update
+    PostMessageW(m_hwnd, WM_APP + 100, 0, 0);
 
     LOG_INFO("Main window created");
     return true;
@@ -117,6 +115,18 @@ bool MainWindow::CreateWindow_(HINSTANCE hInstance) {
         nullptr, nullptr, hInstance, this);
 
     if (m_hwnd) {
+        UINT dpi = GetDpiForWindow(m_hwnd);
+        if (dpi != 0) {
+            m_dpiScale = dpi / 96.f;
+            m_width  = (int)(820.f * m_dpiScale);
+            m_height = (int)(560.f * m_dpiScale);
+            // Re-center with correct DPI
+            int sw = GetSystemMetricsForDpi(SM_CXSCREEN, dpi);
+            int sh = GetSystemMetricsForDpi(SM_CYSCREEN, dpi);
+            x = (sw - m_width)  / 2;
+            y = (sh - m_height) / 2;
+            SetWindowPos(m_hwnd, nullptr, x, y, m_width, m_height, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
         // Enable DWM Immersive Dark Mode (modern Win10 / Win11)
         BOOL darkMode = TRUE;
         DwmSetWindowAttribute(m_hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &darkMode, sizeof(darkMode));
@@ -765,47 +775,6 @@ LRESULT MainWindow::OnDestroy() {
 }
 
 LRESULT MainWindow::OnUpdateAvailable() {
-    const ReleaseInfo& info = Updater::Instance().PendingRelease();
-    if (info.installerUrl.empty()) {
-        std::wstring msg = Localization::Instance().Get(L"settings.update_available") + L"\n\n" +
-                           Localization::Instance().Get(L"settings.version") + L": " + info.version.ToString();
-        MessageBoxW(m_hwnd, msg.c_str(), Localization::Instance().Get(L"settings.title").c_str(), MB_ICONINFORMATION | MB_OK);
-        return 0;
-    }
-
-    std::wstring current(ApplicationMetadata::AppVersion);
-    std::wstring newVer = info.version.ToString();
-    std::wstring msg = Localization::Instance().Get(L"settings.update_available") + L"\n\n" +
-                       Localization::Instance().Get(L"about.version") + L": " + current + L" -> " + newVer + L"\n\n" +
-                       Localization::Instance().Get(L"settings.update_now") + L"?";
-
-    int choice = MessageBoxW(m_hwnd, msg.c_str(),
-        Localization::Instance().Get(L"settings.title").c_str(),
-        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1);
-
-    if (choice == IDYES) {
-        HWND hwnd = m_hwnd;
-        Updater::Instance().DownloadUpdate(
-            info,
-            [hwnd](int pct) {
-                static int last = -1;
-                if (pct - last >= 10 || pct == 100) {
-                    LOG_INFO("Update download: " + std::to_string(pct) + "%");
-                    last = pct;
-                }
-            },
-            [hwnd](bool success, const std::wstring& path) {
-                if (success) {
-                    struct Ctx { std::wstring path; HWND hwnd; };
-                    auto* ctx2 = new Ctx{ path, hwnd };
-                    PostMessageW(hwnd, WM_APP + 100, 0, (LPARAM)ctx2);
-                } else {
-                    MessageBoxW(hwnd,
-                        Localization::Instance().Get(L"common.error").c_str(),
-                        Localization::Instance().Get(L"settings.title").c_str(), MB_ICONERROR | MB_OK);
-                }
-            });
-    }
     return 0;
 }
 
@@ -869,18 +838,6 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         case WM_ERASEBKGND:       return 1; // prevent flicker
         case WM_UPDATE_AVAILABLE: return self->OnUpdateAvailable();
         case WM_APP + 100: {
-            // Download complete — prompt to install (on UI thread)
-            struct Ctx { std::wstring path; HWND hwnd; };
-            auto* ctx2 = reinterpret_cast<Ctx*>(lp);
-            if (ctx2) {
-                int r2 = MessageBoxW(hwnd,
-                    L"\u062a\u0645 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u062a\u062d\u062f\u064a\u062b.\n\u0647\u0644 \u062a\u0631\u064a\u062f \u062a\u062b\u0628\u064a\u062a\u0647 \u0627\u0644\u0622\u0646?\n(\u0633\u064a\u062a\u0645 \u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u062a\u0637\u0628\u064a\u0642)",
-                    L"\u062a\u062b\u0628\u064a\u062a \u0627\u0644\u062a\u062d\u062f\u064a\u062b",
-                    MB_YESNO | MB_ICONQUESTION);
-                if (r2 == IDYES)
-                    Updater::Instance().LaunchInstaller(ctx2->path, hwnd);
-                delete ctx2;
-            }
             return 0;
         }
         case WM_APP + 101: {
@@ -892,8 +849,44 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             }
             return 0;
         }
+        case WM_DPICHANGED: {
+            UINT newDpi = HIWORD(wp);
+            RECT* newRect = reinterpret_cast<RECT*>(lp);
+            return self->OnDpiChanged(newDpi, newRect);
+        }
         default:                  return DefWindowProcW(hwnd, msg, wp, lp);
     }
+}
+
+LRESULT MainWindow::OnDpiChanged(UINT newDpi, const RECT* newRect) {
+    m_dpiScale = newDpi / 96.0f;
+
+    // Resize window
+    SetWindowPos(m_hwnd, nullptr, newRect->left, newRect->top,
+                 newRect->right - newRect->left, newRect->bottom - newRect->top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    // Recreate text formats with new DPI scale
+    if (m_tfVersion) { m_tfVersion->Release(); m_tfVersion = nullptr; }
+    if (m_tfAppName) { m_tfAppName->Release(); m_tfAppName = nullptr; }
+    if (m_tfNavLabel) { m_tfNavLabel->Release(); m_tfNavLabel = nullptr; }
+    if (m_tfIcon) { m_tfIcon->Release(); m_tfIcon = nullptr; }
+
+    InitTextFormats();
+
+    // Trigger components to update sizes
+    WindowChrome::Instance().UpdateMetrics(m_dpiScale, m_width, m_height);
+    if (m_navRail) {
+        m_navRail->SetBounds(SidebarRect());
+    }
+
+    auto cr = ContentRect();
+    for (auto& p : m_pages) {
+        if (p) p->OnSize(cr);
+    }
+
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+    return 0;
 }
 
 } // namespace dhikr

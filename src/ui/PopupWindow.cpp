@@ -59,15 +59,12 @@ bool PopupWindow::Create(HINSTANCE hInstance) {
     m_hInst = hInstance;
     RegisterClass(hInstance);
 
-    // Get DPI
-    HDC hdc = GetDC(nullptr);
-    float dpiX = (float)GetDeviceCaps(hdc, LOGPIXELSX);
-    ReleaseDC(nullptr, hdc);
-    m_dpiScale = dpiX / 96.f;
+    // Use GetDpiForSystem temporarily
+    m_dpiScale = GetDpiForSystem() / 96.f;
 
     // Create layered window (hidden initially)
     m_hwnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
         kClassName,
         L"DhikrPopup",
         WS_POPUP,
@@ -77,6 +74,11 @@ bool PopupWindow::Create(HINSTANCE hInstance) {
     if (!m_hwnd) {
         LOG_ERROR("Failed to create popup window");
         return false;
+    }
+
+    UINT dpi = GetDpiForWindow(m_hwnd);
+    if (dpi != 0) {
+        m_dpiScale = dpi / 96.f;
     }
 
     // Note: DWM backdrop (Mica/Acrylic) is NOT compatible with WS_EX_LAYERED windows
@@ -819,9 +821,43 @@ LRESULT CALLBACK PopupWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_MOUSEMOVE:    return self->OnMouseMove(LOWORD(lp), HIWORD(lp));
         case WM_MOUSELEAVE:   return self->OnMouseLeave();
         case WM_LBUTTONDOWN:  return self->OnLButtonDown(LOWORD(lp), HIWORD(lp));
-        case WM_DESTROY:      return 0;
-        default:              return DefWindowProcW(hwnd, msg, wp, lp);
+        case WM_NCHITTEST:
+            return HTCLIENT;
+
+        case WM_DESTROY:
+            return 0;
+
+        case WM_DPICHANGED: {
+            UINT newDpi = HIWORD(wp);
+            RECT* newRect = reinterpret_cast<RECT*>(lp);
+            return self->OnDpiChanged(newDpi, newRect);
+        }
+
+        default:
+            return DefWindowProcW(hwnd, msg, wp, lp);
     }
+    return 0;
+}
+
+LRESULT PopupWindow::OnDpiChanged(UINT newDpi, const RECT* newRect) {
+    m_dpiScale = newDpi / 96.0f;
+
+    SetWindowPos(m_hwnd, nullptr, newRect->left, newRect->top,
+                 newRect->right - newRect->left, newRect->bottom - newRect->top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    // Recreate text formats with new DPI
+    if (m_textFmtMainLarge) { m_textFmtMainLarge->Release(); m_textFmtMainLarge = nullptr; }
+    if (m_textFmtMainMedium) { m_textFmtMainMedium->Release(); m_textFmtMainMedium = nullptr; }
+    if (m_textFmtMainCompact) { m_textFmtMainCompact->Release(); m_textFmtMainCompact = nullptr; }
+    if (m_textFmtMain) { m_textFmtMain->Release(); m_textFmtMain = nullptr; }
+    if (m_textFmtSub) { m_textFmtSub->Release(); m_textFmtSub = nullptr; }
+    if (m_textFmtSmall) { m_textFmtSmall->Release(); m_textFmtSmall = nullptr; }
+
+    // This will skip factory creation but run format creation
+    InitD2D();
+
+    return 0;
 }
 
 } // namespace dhikr

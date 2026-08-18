@@ -63,9 +63,6 @@ set(AUDIO_SOURCES
     src/audio/AudioEngine.cpp
 )
 
-set(ANALYTICS_SOURCES
-    src/analytics/AnalyticsClient.cpp
-)
 
 set(UPDATE_SOURCES
     src/update/Updater.cpp
@@ -76,7 +73,6 @@ set(ALL_SOURCES
     ${CORE_SOURCES}
     ${UI_SOURCES}
     ${AUDIO_SOURCES}
-    ${ANALYTICS_SOURCES}
     ${UPDATE_SOURCES}
     DhikrReminder.rc
 )
@@ -94,7 +90,6 @@ target_link_libraries(AzkarReminder PRIVATE
     sqlite3
     d2d1
     dwrite
-    winhttp
     shell32
     user32
     gdi32
@@ -115,7 +110,7 @@ target_link_libraries(AzkarReminder PRIVATE
 # ─── Linker settings ──────────────────────────────────────────────────────
 if(MSVC)
     set_target_properties(AzkarReminder PROPERTIES
-        VS_DPI_AWARE "ON"
+        VS_DPI_AWARE "PerMonitor"
         LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup"
     )
 endif()

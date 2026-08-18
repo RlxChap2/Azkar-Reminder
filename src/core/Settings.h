@@ -73,7 +73,6 @@ struct AppSettings {
     bool          firstLaunch       = true;
     bool          paused            = false;
     int           pauseUntilUnix    = 0;      // 0 = not paused
-    bool          analyticsEnabled  = false;  // internal disabled
     long long     lastUpdateCheck   = 0;      // Unix timestamp
 
     // Update checker — persisted so we can show the prompt after restart

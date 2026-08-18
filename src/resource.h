@@ -37,7 +37,6 @@
 #define WM_UPDATER_RESULT     (WM_APP + 9)
 #define WM_CHECK_FOR_UPDATES  (WM_APP + 10)
 #define WM_UPDATE_AVAILABLE   (WM_APP + 12)
-#define WM_ANALYTICS_FLUSH    (WM_APP + 11)
 
 // ── Dialog Control IDs ──────────────────────────────────────────────────────
 #define IDC_STATIC_TEXT         1001
@@ -60,7 +59,6 @@
 #define TIMER_POPUP_AUTODISMISS  3
 #define TIMER_THEME_TRANSITION   4
 #define TIMER_NAV_HOVER          5
-#define TIMER_ANALYTICS_FLUSH    6
 
 // ── Page IDs ────────────────────────────────────────────────────────────────
 #define PAGE_HOME         0

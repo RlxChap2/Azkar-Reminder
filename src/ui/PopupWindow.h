@@ -66,7 +66,8 @@ private:
     LRESULT OnMouseMove(int x, int y);
     LRESULT OnMouseLeave();
     LRESULT OnLButtonDown(int x, int y);
-    LRESULT OnDestroy();
+    LRESULT OnSetCursor(HWND hwnd, UINT hitTest, UINT message);
+    LRESULT OnDpiChanged(UINT newDpi, const RECT* newRect);
 
     // Helpers
     bool HitTestClose(int x, int y) const;

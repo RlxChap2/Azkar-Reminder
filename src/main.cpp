@@ -10,7 +10,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
                       LPWSTR    lpCmdLine,
                       int       /*nCmdShow*/) {
     // ── Single instance enforcement ────────────────────────────────────────
-    HANDLE hMutex = CreateMutexW(nullptr, TRUE, L"AzkarReminderSingleInstance");
+    HANDLE hMutex = CreateMutexW(nullptr, TRUE, L"AzkarReminderSingleInstanceV2");
     if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND existing = FindWindowW(L"DhikrMain", nullptr);
         
@@ -35,6 +35,18 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 
     // If --quit was passed but no instance was running, just exit
     if (lpCmdLine && wcsstr(lpCmdLine, L"--quit") != nullptr) {
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
+
+    if (lpCmdLine && wcsstr(lpCmdLine, L"--setup-autostart") != nullptr) {
+        dhikr::Application::Instance().SetStartWithWindows(true);
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
+
+    if (lpCmdLine && wcsstr(lpCmdLine, L"--remove-autostart") != nullptr) {
+        dhikr::Application::Instance().SetStartWithWindows(false);
         if (hMutex) CloseHandle(hMutex);
         return 0;
     }

@@ -45,3 +45,13 @@ Makefile
 
 # Inno setup generated output
 Output/
+
+# Local test files
+settings.json
+content.json
+
+# Build artifacts
+*.exp
+
+# Removed modules
+src/analytics/

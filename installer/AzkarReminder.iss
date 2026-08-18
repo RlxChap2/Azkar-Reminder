@@ -37,8 +37,8 @@ DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir=..\release
 OutputBaseFilename=AzkarReminder-Setup-v1.1.0
-Compression=lzma2/ultra64
-SolidCompression=yes
+Compression=none
+SolidCompression=no
 MinVersion=10.0
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -54,7 +54,7 @@ RestartApplications=yes
 WizardStyle=modern
 VersionInfoVersion={#AppVersion}
 VersionInfoCompany={#AppPublisher}
-VersionInfoDescription={#AppName} Setup
+VersionInfoDescription=Azkar Reminder - An elegant desktop application to display Dhikr reminders over other windows
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
 VersionInfoCopyright=Copyright © 2026 {#AppPublisher}
@@ -64,6 +64,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "autostart"; Description: "Start Azkar Reminder automatically when Windows starts"; GroupDescription: "Additional tasks:"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
@@ -74,28 +75,14 @@ Name: "{group}\{#AppName}";           Filename: "{app}\AzkarReminder.exe"; IconF
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}";     Filename: "{app}\AzkarReminder.exe"; IconFilename: "{app}\AzkarReminder.exe"; IconIndex: 0; AppUserModelID: "{#AppUserModelID}"; Tasks: desktopicon
 
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "AzkarReminder"; Flags: uninsdeletevalue
-
 [Run]
 Filename: "{app}\AzkarReminder.exe"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent unchecked
+; Create scheduled task if autostart was selected (bypasses schtasks heuristic)
+Filename: "{app}\AzkarReminder.exe"; Parameters: "--setup-autostart"; Flags: runhidden; Tasks: autostart
 
 [UninstallRun]
 Filename: "{app}\AzkarReminder.exe"; Parameters: "--quit"; RunOnceId: "AzkarReminderQuit"; Flags: runhidden skipifdoesntexist
+; Clean up scheduled task
+Filename: "{app}\AzkarReminder.exe"; Parameters: "--remove-autostart"; RunOnceId: "DelSchTask"; Flags: runhidden skipifdoesntexist
 
-[Code]
-function InitializeSetup(): Boolean;
-var
-  ResultCode: Integer;
-begin
-  ShellExec('', 'taskkill', '/F /IM AzkarReminder.exe /IM DhikrReminder.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := True;
-end;
 
-function InitializeUninstall(): Boolean;
-var
-  ResultCode: Integer;
-begin
-  ShellExec('', 'taskkill', '/F /IM AzkarReminder.exe /IM DhikrReminder.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := True;
-end;

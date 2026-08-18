@@ -18,10 +18,10 @@ bool Database::Open(const std::wstring& dbPath) {
         return true;
     }
 
-    // Convert wide path to UTF-8 for SQLite
     int size = WideCharToMultiByte(CP_UTF8, 0, dbPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string utf8Path(size, 0);
     WideCharToMultiByte(CP_UTF8, 0, dbPath.c_str(), -1, utf8Path.data(), size, nullptr, nullptr);
+    LOG_INFO("Opening SQLite database at: " + utf8Path);
 
     int rc = sqlite3_open_v2(utf8Path.c_str(), &m_db,
         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr);
@@ -33,12 +33,14 @@ bool Database::Open(const std::wstring& dbPath) {
         return false;
     }
 
+    LOG_INFO("Executing pragmas...");
     // Performance pragmas
     ExecuteSimple("PRAGMA journal_mode=WAL;");
     ExecuteSimple("PRAGMA synchronous=NORMAL;");
     ExecuteSimple("PRAGMA foreign_keys=ON;");
     ExecuteSimple("PRAGMA cache_size=-4096;"); // 4MB cache
 
+    LOG_INFO("Creating schema...");
     if (!CreateSchema()) {
         LOG_ERROR("Failed to create database schema");
         return false;
@@ -69,13 +71,7 @@ bool Database::CreateSchema() {
         CREATE INDEX IF NOT EXISTS idx_reminder_timestamp ON reminder_events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_reminder_date ON reminder_events(substr(timestamp,1,10));
 
-        CREATE TABLE IF NOT EXISTS analytics_events (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type  TEXT NOT NULL,
-            timestamp   TEXT NOT NULL,
-            app_version TEXT NOT NULL DEFAULT '1.0.0',
-            sent        INTEGER NOT NULL DEFAULT 0
-        );
+
     )";
     return ExecuteSimple(sql);
 }
@@ -257,84 +253,6 @@ std::vector<std::string> Database::GetRecentContentIds(int limit) {
     return result;
 }
 
-bool Database::QueueAnalyticsEvent(const std::string& eventType, const std::string& appVersion) {
-    if (!m_db) return false;
-    const char* sql =
-        "INSERT INTO analytics_events (event_type, timestamp, app_version, sent) "
-        "VALUES (?, ?, ?, 0);";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_text(stmt, 1, eventType.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, CurrentISO8601().c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 3, appVersion.c_str(), -1, SQLITE_TRANSIENT);
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    return rc == SQLITE_DONE;
-}
-
-std::vector<AnalyticsEvent> Database::GetUnsentAnalyticsEvents(int limit) {
-    std::vector<AnalyticsEvent> result;
-    if (!m_db) return result;
-    const char* sql =
-        "SELECT id, event_type, timestamp, app_version, sent "
-        "FROM analytics_events WHERE sent=0 ORDER BY id ASC LIMIT ?;";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
-    sqlite3_bind_int(stmt, 1, limit);
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        AnalyticsEvent ev;
-        ev.id         = sqlite3_column_int64(stmt, 0);
-        ev.eventType  = (const char*)sqlite3_column_text(stmt, 1);
-        ev.timestamp  = (const char*)sqlite3_column_text(stmt, 2);
-        ev.appVersion = (const char*)sqlite3_column_text(stmt, 3);
-        ev.sent       = sqlite3_column_int(stmt, 4) != 0;
-        result.push_back(ev);
-    }
-    sqlite3_finalize(stmt);
-    return result;
-}
-
-std::vector<AnalyticsEvent> Database::DequeueAnalyticsEvents(int limit) {
-    std::vector<AnalyticsEvent> events = GetUnsentAnalyticsEvents(limit);
-    if (events.empty() || !m_db) return events;
-
-    std::vector<int64_t> ids;
-    for (const auto& ev : events) {
-        ids.push_back(ev.id);
-    }
-    MarkAnalyticsSentBatch(ids);
-
-    return events;
-}
-
-void Database::RequeueAnalyticsEvents(const std::vector<AnalyticsEvent>& events) {
-    if (!m_db || events.empty()) return;
-    for (const auto& ev : events) {
-        const char* sql = "UPDATE analytics_events SET sent=0 WHERE id=?;";
-        sqlite3_stmt* stmt = nullptr;
-        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) continue;
-        sqlite3_bind_int64(stmt, 1, ev.id);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-}
-
-void Database::ClearAnalyticsQueue() {
-    ExecuteSimple("DELETE FROM analytics_events;");
-}
-
-bool Database::MarkAnalyticsSentBatch(const std::vector<int64_t>& ids) {
-    if (!m_db || ids.empty()) return false;
-    for (auto id : ids) {
-        const char* sql = "UPDATE analytics_events SET sent=1 WHERE id=?;";
-        sqlite3_stmt* stmt = nullptr;
-        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) continue;
-        sqlite3_bind_int64(stmt, 1, id);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-    }
-    return true;
-}
 
 bool Database::Vacuum() {
     return ExecuteSimple("VACUUM;");

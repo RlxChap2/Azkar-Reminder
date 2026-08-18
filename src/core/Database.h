@@ -23,14 +23,6 @@ struct ReminderEvent {
     std::string action;       // "delivered", "dismissed", "snoozed"
 };
 
-// ── Analytics batch event ────────────────────────────────────────────────────
-struct AnalyticsEvent {
-    int64_t     id;
-    std::string eventType;
-    std::string timestamp;
-    std::string appVersion;
-    bool        sent;
-};
 
 // ── Database wrapper ──────────────────────────────────────────────────────────
 class Database {
@@ -55,15 +47,6 @@ public:
     std::vector<DailyStat>     GetDailyStats(int days = 30);
     std::vector<ReminderEvent> GetRecentEvents(int limit = 100);
     std::vector<std::string>   GetRecentContentIds(int limit = 50);
-
-    // Analytics
-    bool QueueAnalyticsEvent(const std::string& eventType, const std::string& appVersion);
-    std::vector<AnalyticsEvent> GetUnsentAnalyticsEvents(int limit = 50);
-    std::vector<AnalyticsEvent> DequeueAnalyticsEvents(int limit = 50);
-    void RequeueAnalyticsEvents(const std::vector<AnalyticsEvent>& events);
-    void ClearAnalyticsQueue();
-    bool MarkAnalyticsSent(int64_t id);
-    bool MarkAnalyticsSentBatch(const std::vector<int64_t>& ids);
 
     // Maintenance
     bool Vacuum();

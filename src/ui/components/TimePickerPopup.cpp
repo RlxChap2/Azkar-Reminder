@@ -228,6 +228,37 @@ LRESULT TimePickerPopup::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         }
         return 0;
 
+    case WM_DPICHANGED: {
+        UINT newDpi = HIWORD(wp);
+        RECT* newRect = reinterpret_cast<RECT*>(lp);
+        
+        m_dpiScale = newDpi / 96.0f;
+        SetWindowPos(m_hwnd, nullptr, newRect->left, newRect->top,
+                     newRect->right - newRect->left, newRect->bottom - newRect->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+
+        if (m_tfBig) { m_tfBig->Release(); m_tfBig = nullptr; }
+        if (m_tfBtn) { m_tfBtn->Release(); m_tfBtn = nullptr; }
+
+        if (m_dwf) {
+            m_dwf->CreateTextFormat(L"Noto Sans", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL, 32.f * m_dpiScale, L"en-US", &m_tfBig);
+            if (m_tfBig) {
+                m_tfBig->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                m_tfBig->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            }
+
+            m_dwf->CreateTextFormat(L"Noto Sans", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL, ds::FontSize::BtnLabel * m_dpiScale, L"en-US", &m_tfBtn);
+            if (m_tfBtn) {
+                m_tfBtn->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                m_tfBtn->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            }
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+    }
+
     case WM_KILLFOCUS:
         Close();
         return 0;

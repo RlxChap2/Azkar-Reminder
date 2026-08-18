@@ -10,12 +10,16 @@
 #include "../ui/TrayIcon.h"
 #include "../ui/OnboardingFlow.h"
 #include "../audio/AudioEngine.h"
-#include "../analytics/AnalyticsClient.h"
 #include "../update/Updater.h"
 #include "../../src/resource.h"
 #include <shlobj.h>
 #include <sstream>
 #include <filesystem>
+#include <comdef.h>
+#include <taskschd.h>
+
+#pragma comment(lib, "taskschd.lib")
+#pragma comment(lib, "comsuppw.lib")
 
 namespace dhikr {
 
@@ -76,31 +80,7 @@ bool Application::Initialize(HINSTANCE hInstance) {
                 LOG_INFO("Loaded default content from embedded resource (" + std::to_string(ContentEngine::Instance().Count()) + " items)");
                 ContentEngine::Instance().Save(); // Persist initial database to user's AppData
             } else {
-                LOG_WARN("Failed to load embedded content resource, checking local files...");
-                wchar_t exePathBuf[MAX_PATH];
-                GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH);
-                std::wstring exeDir = exePathBuf;
-                size_t lastSlash = exeDir.find_last_of(L"\\/");
-                if (lastSlash != std::wstring::npos) {
-                    exeDir = exeDir.substr(0, lastSlash);
-                }
-
-                std::wstring mdCandidates[] = {
-                    exeDir + L"\\content.md",
-                    exeDir + L"\\assets\\content.md",
-                    L"content.md"
-                };
-
-                for (const auto& mdPath : mdCandidates) {
-                    if (std::filesystem::exists(mdPath)) {
-                        loadResult = ContentEngine::Instance().LoadFromMarkdownFile(mdPath);
-                        if (loadResult == ContentLoadResult::Success && !ContentEngine::Instance().IsEmpty()) {
-                            LOG_INFO("Loaded fallback content from markdown file (" + std::to_string(ContentEngine::Instance().Count()) + " items)");
-                            ContentEngine::Instance().Save();
-                            break;
-                        }
-                    }
-                }
+                LOG_ERROR("Failed to load embedded content resource. Ensure IDR_CONTENT_MD is properly compiled into the executable.");
             }
         }
 
@@ -133,19 +113,29 @@ bool Application::InitAppDataPath() {
         if (GetLastError() != ERROR_ALREADY_EXISTS) return false;
     }
 
-    // Auto-migrate settings/database from old folder if needed
-    std::wstring oldDb = oldPath + L"\\dhikr.db";
-    std::wstring newDb = m_appDataPath + L"\\dhikr.db";
-    if (GetFileAttributesW(newDb.c_str()) == INVALID_FILE_ATTRIBUTES &&
-        GetFileAttributesW(oldDb.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        CopyFileW(oldDb.c_str(), newDb.c_str(), TRUE);
-    }
-    std::wstring oldSettings = oldPath + L"\\settings.json";
+    // Auto-migrate settings/database/content from the legacy path ONLY if needed
+    // DO NOT migrate from executable path as it breaks installations
+    
+    std::wstring newDb = m_appDataPath + L"\\history.db";
     std::wstring newSettings = m_appDataPath + L"\\settings.json";
-    if (GetFileAttributesW(newSettings.c_str()) == INVALID_FILE_ATTRIBUTES &&
-        GetFileAttributesW(oldSettings.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        CopyFileW(oldSettings.c_str(), newSettings.c_str(), TRUE);
+    std::wstring newContent = m_appDataPath + L"\\content.json";
+
+    auto migrateFile = [](const std::wstring& oldFile, const std::wstring& newFile) {
+        if (GetFileAttributesW(newFile.c_str()) == INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesW(oldFile.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            CopyFileW(oldFile.c_str(), newFile.c_str(), TRUE);
+            return true;
+        }
+        return false;
+    };
+
+    // Migrate database (older version used dhikr.db, new version expects history.db)
+    if (!migrateFile(oldPath + L"\\history.db", newDb)) {
+        migrateFile(oldPath + L"\\dhikr.db", newDb);
     }
+    
+    migrateFile(oldPath + L"\\settings.json", newSettings);
+    migrateFile(oldPath + L"\\content.json", newContent);
 
     return true;
 }
@@ -203,16 +193,9 @@ int Application::Run() {
     // Start scheduler — it posts WM_REMINDER_TRIGGER to main window
     Scheduler::Instance().Start(m_mainHwnd);
 
-    // Queue startup analytics event (if enabled)
-    if (settings.analyticsEnabled) {
-        char aVer[64];
-        WideCharToMultiByte(CP_UTF8, 0, ApplicationMetadata::AppVersion, -1, aVer, sizeof(aVer), nullptr, nullptr);
-        Database::Instance().QueueAnalyticsEvent("app_start", aVer);
-        AnalyticsClient::Instance().ScheduleFlush(m_mainHwnd);
-    }
-
     // Check for updates (async, once per 24h)
-    Updater::Instance().CheckIfDue(m_mainHwnd);
+    // NOTE: Updater::CheckIfDue was intentionally removed to avoid ML heuristics.
+    // The application no longer phones home silently in the background.
 
     // ── Message loop ───────────────────────────────────────────────────────
     MSG msg{};
@@ -234,14 +217,6 @@ void Application::Shutdown() {
     TrayIcon::Instance().Remove();
     AudioEngine::Instance().Shutdown();
 
-    // Final analytics flush
-    auto& settings = Settings::Instance().Get();
-    if (settings.analyticsEnabled) {
-        char sVer[64];
-        WideCharToMultiByte(CP_UTF8, 0, ApplicationMetadata::AppVersion, -1, sVer, sizeof(sVer), nullptr, nullptr);
-        Database::Instance().QueueAnalyticsEvent("app_stop", sVer);
-    }
-
     Updater::Instance().Shutdown();
     Database::Instance().Checkpoint();
     Database::Instance().Close();
@@ -255,41 +230,183 @@ void Application::Shutdown() {
 }
 
 bool Application::SetStartWithWindows(bool enable) {
+    // 1. Clean up legacy registry keys unconditionally
     HKEY key;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-            L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-            0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return false;
-
-    bool result;
-    if (enable) {
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        std::wstring cmd = L"\"" + std::wstring(exePath) + L"\" --background";
-        result = (RegSetValueExW(key, L"AzkarReminder", 0, REG_SZ,
-            (const BYTE*)cmd.c_str(),
-            (DWORD)((cmd.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS);
-        // Clean up legacy key if it existed
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS) {
+        RegDeleteValueW(key, L"AzkarReminder");
         RegDeleteValueW(key, L"DhikrReminder");
-    } else {
-        result = (RegDeleteValueW(key, L"AzkarReminder") == ERROR_SUCCESS ||
-                  GetLastError() == ERROR_FILE_NOT_FOUND);
-        RegDeleteValueW(key, L"DhikrReminder");
+        RegCloseKey(key);
     }
-    RegCloseKey(key);
-    return result;
+
+    // 2. COM initialization
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    bool coInit = SUCCEEDED(hr);
+
+    ITaskService* pService = NULL;
+    hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+    if (FAILED(hr)) {
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    if (FAILED(hr)) {
+        pService->Release();
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    ITaskFolder* pRootFolder = NULL;
+    hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+    if (FAILED(hr)) {
+        pService->Release();
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    const wchar_t* taskName = L"Azkar Reminder";
+
+    if (!enable) {
+        pRootFolder->DeleteTask(_bstr_t(taskName), 0);
+        pRootFolder->Release();
+        pService->Release();
+        if (coInit) CoUninitialize();
+        return true;
+    }
+
+    pRootFolder->DeleteTask(_bstr_t(taskName), 0); // remove old if exists
+
+    ITaskDefinition* pTask = NULL;
+    hr = pService->NewTask(0, &pTask);
+    if (FAILED(hr)) {
+        pRootFolder->Release();
+        pService->Release();
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    IPrincipal* pPrincipal = NULL;
+    hr = pTask->get_Principal(&pPrincipal);
+    if (SUCCEEDED(hr)) {
+        pPrincipal->put_LogonType(TASK_LOGON_INTERACTIVE_TOKEN);
+        pPrincipal->put_RunLevel(TASK_RUNLEVEL_LUA);
+        pPrincipal->Release();
+    }
+
+    IRegistrationInfo* pRegInfo = NULL;
+    pTask->get_RegistrationInfo(&pRegInfo);
+    if (pRegInfo) {
+        pRegInfo->put_Author(_bstr_t(L"Ahmed Mohamed Kamel"));
+        pRegInfo->put_Description(_bstr_t(L"Start Azkar Reminder automatically when Windows starts"));
+        pRegInfo->Release();
+    }
+
+    ITaskSettings* pSettings = NULL;
+    pTask->get_Settings(&pSettings);
+    if (pSettings) {
+        pSettings->put_StartWhenAvailable(VARIANT_TRUE);
+        pSettings->put_DisallowStartIfOnBatteries(VARIANT_FALSE);
+        pSettings->put_StopIfGoingOnBatteries(VARIANT_FALSE);
+        pSettings->put_ExecutionTimeLimit(_bstr_t(L"PT0S")); // 0 = no limit
+        pSettings->Release();
+    }
+
+    ITriggerCollection* pTriggerCollection = NULL;
+    hr = pTask->get_Triggers(&pTriggerCollection);
+    if (SUCCEEDED(hr)) {
+        ITrigger* pTrigger = NULL;
+        hr = pTriggerCollection->Create(TASK_TRIGGER_LOGON, &pTrigger);
+        if (SUCCEEDED(hr)) {
+            ILogonTrigger* pLogonTrigger = NULL;
+            pTrigger->QueryInterface(IID_ILogonTrigger, (void**)&pLogonTrigger);
+            if (pLogonTrigger) {
+                pLogonTrigger->put_Id(_bstr_t(L"Trigger1"));
+                pLogonTrigger->Release();
+            }
+            pTrigger->Release();
+        }
+        pTriggerCollection->Release();
+    }
+
+    IActionCollection* pActionCollection = NULL;
+    hr = pTask->get_Actions(&pActionCollection);
+    if (SUCCEEDED(hr)) {
+        IAction* pAction = NULL;
+        hr = pActionCollection->Create(TASK_ACTION_EXEC, &pAction);
+        if (SUCCEEDED(hr)) {
+            IExecAction* pExecAction = NULL;
+            pAction->QueryInterface(IID_IExecAction, (void**)&pExecAction);
+            if (pExecAction) {
+                wchar_t exePath[MAX_PATH];
+                GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+                pExecAction->put_Path(_bstr_t(exePath));
+                pExecAction->put_Arguments(_bstr_t(L"--background"));
+                pExecAction->Release();
+            }
+            pAction->Release();
+        }
+        pActionCollection->Release();
+    }
+
+    IRegisteredTask* pRegisteredTask = NULL;
+    hr = pRootFolder->RegisterTaskDefinition(
+        _bstr_t(taskName),
+        pTask,
+        TASK_CREATE_OR_UPDATE,
+        _variant_t(),
+        _variant_t(),
+        TASK_LOGON_INTERACTIVE_TOKEN,
+        _variant_t(L""),
+        &pRegisteredTask);
+
+    if (pRegisteredTask) pRegisteredTask->Release();
+    pTask->Release();
+    pRootFolder->Release();
+    pService->Release();
+    if (coInit) CoUninitialize();
+
+    return SUCCEEDED(hr);
 }
 
 bool Application::GetStartsWithWindows() const {
-    HKEY key;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-            L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-            0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return false;
-    DWORD type = REG_SZ, size = 0;
-    bool exists = (RegQueryValueExW(key, L"AzkarReminder",
-                   nullptr, &type, nullptr, &size) == ERROR_SUCCESS ||
-                   RegQueryValueExW(key, L"DhikrReminder",
-                   nullptr, &type, nullptr, &size) == ERROR_SUCCESS);
-    RegCloseKey(key);
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    bool coInit = SUCCEEDED(hr);
+
+    ITaskService* pService = NULL;
+    hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER, IID_ITaskService, (void**)&pService);
+    if (FAILED(hr)) {
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+    if (FAILED(hr)) {
+        pService->Release();
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    ITaskFolder* pRootFolder = NULL;
+    hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+    if (FAILED(hr)) {
+        pService->Release();
+        if (coInit) CoUninitialize();
+        return false;
+    }
+
+    IRegisteredTask* pRegisteredTask = NULL;
+    hr = pRootFolder->GetTask(_bstr_t(L"Azkar Reminder"), &pRegisteredTask);
+    
+    bool exists = false;
+    if (SUCCEEDED(hr) && pRegisteredTask) {
+        exists = true;
+        pRegisteredTask->Release();
+    }
+
+    pRootFolder->Release();
+    pService->Release();
+    if (coInit) CoUninitialize();
+
     return exists;
 }
 

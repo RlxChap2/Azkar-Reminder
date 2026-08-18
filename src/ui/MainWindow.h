@@ -102,6 +102,7 @@ private:
     LRESULT OnClose();
     LRESULT OnDestroy();
     LRESULT OnUpdateAvailable();      // WM_UPDATE_AVAILABLE from Updater
+    LRESULT OnDpiChanged(UINT newDpi, const RECT* newRect);
 
     // Layout helpers
     D2D1_RECT_F SidebarRect() const;
