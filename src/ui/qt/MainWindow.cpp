@@ -14,6 +14,8 @@
 #include <QScrollArea>
 #include <QGroupBox>
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QSignalBlocker>
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QGuiApplication>
@@ -54,6 +56,7 @@ MainWindow::~MainWindow() {
     Scheduler::Instance().Stop();
     if (m_popupWindow) {
         delete m_popupWindow;
+        m_popupWindow = nullptr;
     }
 }
 
@@ -106,6 +109,7 @@ void MainWindow::SetupSidebar() {
 void MainWindow::OnNavigationChanged(int index) {
     m_pageStack->setCurrentIndex(index);
     if (index == 0) RefreshDashboardStats();
+    else if (index == 2) PopulateLibraryList();
 }
 
 void MainWindow::OnThemeChanged() {
@@ -135,7 +139,7 @@ QWidget* MainWindow::CreateHomePage() {
     auto* btnRow = new QHBoxLayout();
     m_btnRemindNow = new QPushButton(QString::fromStdWString(Localization::Instance().Get(L"home.remind_now", L"عرض ذكر الآن")));
     m_btnRemindNow->setObjectName("PrimaryButton");
-    connect(m_btnRemindNow, &QPushButton::clicked, this, &MainWindow::TriggerReminder);
+    connect(m_btnRemindNow, &QPushButton::clicked, this, &MainWindow::TriggerPreview);
     btnRow->addWidget(m_btnRemindNow);
 
     auto* btnPause15 = new QPushButton(QString::fromStdWString(Localization::Instance().Get(L"home.pause_15", L"إيقاف 15 دقيقة")));
@@ -203,7 +207,7 @@ QWidget* MainWindow::CreateRemindersPage() {
     auto* lblInt = new QLabel(QString::fromStdWString(Localization::Instance().Get(L"reminders.every", L"إظهار ذكر كل:")));
     m_comboInterval = new QComboBox();
     m_comboInterval->addItems({"5 دقائق", "10 دقائق", "15 دقيقة", "20 دقيقة", "30 دقيقة", "45 دقيقة", "60 دقيقة", "90 دقيقة", "120 دقيقة"});
-    
+
     int currentMins = Settings::Instance().Get().weeklySchedule[0].frequencyMinutes;
     if (currentMins <= 0) currentMins = 15;
     int idx = 2; // default 15
@@ -302,7 +306,7 @@ QWidget* MainWindow::CreateRemindersPage() {
     m_sliderVolume = new QSlider(Qt::Horizontal);
     m_sliderVolume->setRange(0, 100);
     m_sliderVolume->setValue(Settings::Instance().Get().soundVolume);
-    connect(m_sliderVolume, &QSlider::valueChanged, this, [this](int val) {
+    connect(m_sliderVolume, &QSlider::valueChanged, this, [](int val) {
         Settings::Instance().Get().soundVolume = val;
         Settings::Instance().Save();
     });
@@ -335,13 +339,88 @@ QWidget* MainWindow::CreateRemindersPage() {
     return page;
 }
 
+void MainWindow::PopulateLibraryList() {
+    if (!m_listContent || !m_txtSearch || !m_comboCategory) return;
+
+    QSignalBlocker blocker(m_listContent);
+    m_listContent->clear();
+
+    QString filter = m_txtSearch->text().trimmed();
+    QString cat = m_comboCategory->currentText();
+    int catIdx = m_comboCategory->currentIndex();
+
+    const auto& items = ContentEngine::Instance().GetItems();
+    for (const auto& item : items) {
+        QString txt = QString::fromStdWString(item.text);
+        QString c = QString::fromStdString(item.category);
+        if (!filter.isEmpty() && !txt.contains(filter, Qt::CaseInsensitive)) continue;
+        if (catIdx > 0 && c != cat) continue;
+
+        auto* listItem = new QListWidgetItem(QString("[%1]  %2").arg(c, txt), m_listContent);
+        listItem->setData(Qt::UserRole, QString::fromStdString(item.id));
+        listItem->setSizeHint(QSize(200, 40));
+    }
+}
+
+void MainWindow::OnAddCustomDhikr() {
+    bool ok = false;
+    QString text = QInputDialog::getMultiLineText(
+        this,
+        QString::fromStdWString(Localization::Instance().Get(L"library.dialog_title", L"إضافة ذكر مخصص")),
+        QString::fromStdWString(Localization::Instance().Get(L"library.enter_dhikr", L"اكتب نص الذكر:")),
+        QString(),
+        &ok
+    ).trimmed();
+
+    if (!ok || text.isEmpty()) return;
+
+    ContentItem newItem;
+    newItem.id = "custom_" + std::to_string(QDateTime::currentMSecsSinceEpoch()) + "_" + std::to_string(rand());
+    newItem.text = text.toStdWString();
+    newItem.category = "custom";
+    newItem.priority = 1;
+    newItem.repetitions = 1;
+    newItem.enabled = true;
+
+    ContentEngine::Instance().AddItem(newItem);
+
+    // Ensure "custom" category is in the filter combo if not already present
+    if (m_comboCategory && m_comboCategory->findText("custom") == -1) {
+        m_comboCategory->addItem("custom");
+    }
+
+    PopulateLibraryList();
+}
+
+void MainWindow::OnDeleteSelectedDhikr() {
+    if (!m_listContent) return;
+    QListWidgetItem* current = m_listContent->currentItem();
+    if (!current) return;
+
+    // Copy ID string safely before any dialog or list mutation to prevent dangling pointer crashes
+    QString targetId = current->data(Qt::UserRole).toString();
+    if (targetId.isEmpty()) return;
+
+    auto reply = QMessageBox::question(
+        this,
+        QString::fromStdWString(Localization::Instance().Get(L"library.delete_title", L"حذف الذكر")),
+        QString::fromStdWString(Localization::Instance().Get(L"library.delete_item_confirm", L"هل أنت متأكد من حذف هذا الذكر؟")),
+        QMessageBox::Yes | QMessageBox::No
+    );
+
+    if (reply == QMessageBox::Yes) {
+        ContentEngine::Instance().DeleteItemById(targetId.toStdString());
+        PopulateLibraryList();
+    }
+}
+
 QWidget* MainWindow::CreateLibraryPage() {
     auto* page = new QWidget();
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(28, 24, 28, 24);
     layout->setSpacing(14);
 
-    // Search & Filter Row
+    // Search, Filter & Custom Dhikr Actions Row
     auto* filterRow = new QHBoxLayout();
     m_txtSearch = new QLineEdit();
     m_txtSearch->setPlaceholderText(QString::fromStdWString(Localization::Instance().Get(L"library.search", L"بحث في الأذكار...")));
@@ -353,36 +432,28 @@ QWidget* MainWindow::CreateLibraryPage() {
         m_comboCategory->addItem(QString::fromStdString(c));
     }
 
+    m_btnAddDhikr = new QPushButton(QString::fromStdWString(Localization::Instance().Get(L"library.add_dhikr", L"+ إضافة ذكر")));
+    m_btnAddDhikr->setObjectName("PrimaryButton");
+    connect(m_btnAddDhikr, &QPushButton::clicked, this, &MainWindow::OnAddCustomDhikr);
+
+    m_btnDeleteDhikr = new QPushButton(QString::fromUtf8("🗑 حذف المحدد"));
+    connect(m_btnDeleteDhikr, &QPushButton::clicked, this, &MainWindow::OnDeleteSelectedDhikr);
+
     filterRow->addWidget(m_txtSearch, 1);
     filterRow->addWidget(m_comboCategory);
+    filterRow->addWidget(m_btnAddDhikr);
+    filterRow->addWidget(m_btnDeleteDhikr);
     layout->addLayout(filterRow);
 
     // Content List
     m_listContent = new QListWidget();
     m_listContent->setStyleSheet("QListWidget { background-color: #101310; border-radius: 8px; padding: 6px; }");
 
-    auto populateList = [this]() {
-        m_listContent->clear();
-        QString filter = m_txtSearch->text();
-        QString cat = m_comboCategory->currentText();
-
-        const auto& items = ContentEngine::Instance().GetItems();
-        for (const auto& item : items) {
-            QString txt = QString::fromStdWString(item.text);
-            QString c = QString::fromStdString(item.category);
-            if (!filter.isEmpty() && !txt.contains(filter, Qt::CaseInsensitive)) continue;
-            if (m_comboCategory->currentIndex() > 0 && c != cat) continue;
-
-            auto* listItem = new QListWidgetItem(QString("[%1]  %2").arg(c, txt), m_listContent);
-            listItem->setSizeHint(QSize(200, 38));
-        }
-    };
-
-    connect(m_txtSearch, &QLineEdit::textChanged, this, populateList);
-    connect(m_comboCategory, QOverload<int>::of(&QComboBox::currentIndexChanged), this, populateList);
+    connect(m_txtSearch, &QLineEdit::textChanged, this, &MainWindow::PopulateLibraryList);
+    connect(m_comboCategory, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::PopulateLibraryList);
 
     layout->addWidget(m_listContent, 1);
-    populateList();
+    PopulateLibraryList();
 
     return page;
 }
@@ -398,13 +469,20 @@ QWidget* MainWindow::CreateSettingsPage() {
     layout->setContentsMargins(28, 24, 28, 24);
     layout->setSpacing(20);
 
-    // Themes
+    // Themes (Aligned 1-to-1 with ColorTheme enum: Green, Yellow, Blue, Red, Silver, Gold)
     auto* grpTheme = new QGroupBox(QString::fromStdWString(Localization::Instance().Get(L"settings.theme_group", L"المظهر والألوان")));
     auto* lTheme = new QHBoxLayout(grpTheme);
     lTheme->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"settings.theme_color", L"لون الثيم:"))));
     m_comboTheme = new QComboBox();
-    m_comboTheme->addItems({"Emerald (الزمردي الأيقوني)", "Sapphire (السماوي)", "Ruby (الياقوت)", "Amethyst (البنفسجي)", "Amber (الكهرمان)", "Gold (الذهبي الملكي)", "Silver (الفضي النقي)"});
-    m_comboTheme->setCurrentIndex((int)Settings::Instance().Get().colorTheme);
+    m_comboTheme->addItems({
+        "Green (الأخضر الزمردي)",
+        "Yellow (الأصفر المشع)",
+        "Blue (السماوي)",
+        "Red (الياقوتي)",
+        "Silver (الفضي البلاتيني)",
+        "Gold (الذهبي الملكي)"
+    });
+    m_comboTheme->setCurrentIndex(std::clamp((int)Settings::Instance().Get().colorTheme, 0, 5));
 
     connect(m_comboTheme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [](int index) {
         Settings::Instance().Get().colorTheme = (ColorTheme)index;
@@ -415,7 +493,7 @@ QWidget* MainWindow::CreateSettingsPage() {
     lTheme->addStretch();
     layout->addWidget(grpTheme);
 
-    // Animations (8 Styles)
+    // Animations (Aligned 1-to-1 with PopupAnimation & AnimationSpeed enums)
     auto* grpAnim = new QGroupBox(QString::fromStdWString(Localization::Instance().Get(L"settings.animation_group", L"أنماط الحركة والأنيميشن")));
     auto* lAnim = new QVBoxLayout(grpAnim);
 
@@ -423,28 +501,38 @@ QWidget* MainWindow::CreateSettingsPage() {
     animRow1->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"settings.anim_style", L"نمط ظهور التذكير:"))));
     m_comboAnimation = new QComboBox();
     m_comboAnimation->addItems({
-        "Classic (كلاسيكي)",
-        "Spring Bloom (انبثاق الربيع)",
-        "Liquid Float (تموج الواحة)",
-        "Horizontal Drift (انسياب جانبي)",
-        "Origami (طي الأوريجامي)",
-        "Ethereal Sweep (وميض أثيري)",
-        "Zen Breathing (تنفس السكينة)",
-        "Ripple Genesis (أمواج متتالية)"
+        "Classic (انزلاق كلاسيكي ناعم)",
+        "Spring Bloom (انبثاق حيوي نابض)",
+        "Horizontal Drift (انسياب جانبي هادئ)",
+        "Liquid Float (طفو مائي متموج)",
+        "Origami Unfurl (انفتاح المخطوطة)",
+        "Ethereal Sweep (بريق الهالة النورانية)",
+        "Zen Breathing (تنفس السكينة المتناغم)",
+        "Ripple Genesis (تموج الواحة الهادئ)"
     });
-    m_comboAnimation->setCurrentIndex((int)Settings::Instance().Get().popupAnimation);
-    connect(m_comboAnimation, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [](int index) {
+    m_comboAnimation->setCurrentIndex(std::clamp((int)Settings::Instance().Get().popupAnimation, 0, 7));
+    connect(m_comboAnimation, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         Settings::Instance().Get().popupAnimation = (PopupAnimation)index;
         Settings::Instance().Save();
+        TriggerPreview();
     });
+
+    auto* btnPreviewAnim = new QPushButton(QString::fromStdWString(Localization::Instance().Get(L"settings.preview_anim", L"▶ معاينة الحركة")));
+    connect(btnPreviewAnim, &QPushButton::clicked, this, &MainWindow::TriggerPreview);
+
     animRow1->addWidget(m_comboAnimation);
+    animRow1->addWidget(btnPreviewAnim);
     animRow1->addStretch();
 
     auto* animRow2 = new QHBoxLayout();
     animRow2->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"settings.anim_speed", L"سرعة الحركة:"))));
     m_comboAnimSpeed = new QComboBox();
-    m_comboAnimSpeed->addItems({"Snappy (خاطف 250ms)", "Balanced (متزن 400ms)", "Smooth (ناعم 600ms)"});
-    m_comboAnimSpeed->setCurrentIndex((int)Settings::Instance().Get().animationSpeed);
+    m_comboAnimSpeed->addItems({
+        "Normal (متزن وطبيعي)",
+        "Cinematic (سينمائي هادئ)",
+        "Snappy (سريع وخاطف)"
+    });
+    m_comboAnimSpeed->setCurrentIndex(std::clamp((int)Settings::Instance().Get().animationSpeed, 0, 2));
     connect(m_comboAnimSpeed, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [](int index) {
         Settings::Instance().Get().animationSpeed = (AnimationSpeed)index;
         Settings::Instance().Save();
@@ -463,7 +551,7 @@ QWidget* MainWindow::CreateSettingsPage() {
     auto* durRow = new QHBoxLayout();
     durRow->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"settings.duration", L"مدة بقاء التذكير على الشاشة:"))));
     m_sliderDuration = new QSlider(Qt::Horizontal);
-    m_sliderDuration->setRange(5, 60);
+    m_sliderDuration->setRange(2, 60);
     m_sliderDuration->setValue(Settings::Instance().Get().popupDurationSec);
     m_lblDurationValue = new QLabel(QString::number(Settings::Instance().Get().popupDurationSec) + " ثانية");
 
@@ -566,7 +654,7 @@ void MainWindow::RefreshDashboardStats() {
 }
 
 void MainWindow::TriggerReminder() {
-    // Check fullscreen suppression
+    // Check fullscreen suppression for automatic scheduled reminders
     if (Settings::Instance().Get().suppressDuringFullscreen && m_fsDetector) {
         if (m_fsDetector->IsFullScreenActive()) {
             LOG_INFO("Reminder suppressed due to active fullscreen application");
@@ -574,15 +662,26 @@ void MainWindow::TriggerReminder() {
         }
     }
 
+    TriggerPreview();
+}
+
+void MainWindow::TriggerPreview() {
+    if (ContentEngine::Instance().IsEmpty()) {
+        ContentEngine::Instance().LoadFromResource();
+    }
+
     const auto* item = ContentEngine::Instance().GetNext();
     if (!item) return;
+
+    // Copy item by value immediately before dispatching to UI
+    ContentItem itemCopy = *item;
 
     if (m_audioEngine) {
         m_audioEngine->PlayReminder();
     }
 
     if (m_popupWindow) {
-        m_popupWindow->ShowReminder(*item);
+        m_popupWindow->ShowReminder(itemCopy);
     }
 
     RefreshDashboardStats();

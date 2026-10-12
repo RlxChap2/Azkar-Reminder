@@ -149,27 +149,11 @@ void LibraryPage::DrawContentItem(ID2D1RenderTarget* rt, float x, float& y, floa
         rt->FillRoundedRectangle(D2D1::RoundedRect(accent, 2, 2), m_brush);
     }
 
-    // Left controls zone (Delete icon and Repetition badge)
+    // Left controls zone (Delete icon)
     float delSize = 28.f * m_dpiScale;
     float delLeft = x + (isRtl ? (32.f * m_dpiScale) : (16.f * m_dpiScale));
     float delTop  = y + (itemH - delSize) / 2.f;
     D2D1_RECT_F delR = D2D1::RectF(delLeft, delTop, delLeft + delSize, delTop + delSize);
-
-    // Repetition Badge
-    float repW = 0.f;
-    if (m_tfCat && item.repetitions > 1) {
-        std::wstring repStr = L"×" + std::to_wstring(item.repetitions);
-        float rw = 32.f * m_dpiScale;
-        float rh = 20.f * m_dpiScale;
-        float rxP = delLeft + delSize + 8.f * m_dpiScale;
-        float ryP = y + (itemH - rh) / 2.f;
-        D2D1_RECT_F repR = D2D1::RectF(rxP, ryP, rxP + rw, ryP + rh);
-        m_brush->SetColor(ds::Rgba(0x1B, 0x27, 0x1C));
-        rt->FillRoundedRectangle(D2D1::RoundedRect(repR, 4.f*m_dpiScale, 4.f*m_dpiScale), m_brush);
-        m_brush->SetColor(ds::Accent::Primary(0.7f));
-        rt->DrawTextW(repStr.c_str(), (UINT32)repStr.size(), m_tfCat, repR, m_brush);
-        repW = rw + 8.f * m_dpiScale;
-    }
 
     // Delete icon button (Fluent Trash Can in polished circular badge on far left)
     if (hovered && m_tfIconSmall) {
@@ -194,7 +178,7 @@ void LibraryPage::DrawContentItem(ID2D1RenderTarget* rt, float x, float& y, floa
     // Main text (Arabic, RTL) - well clear of left controls
     if (m_tfMain && !item.text.empty()) {
         m_brush->SetColor(item.enabled ? ds::TextPrimary() : ds::TextMuted());
-        float textLeft = delLeft + delSize + repW + 14.f * m_dpiScale;
+        float textLeft = delLeft + delSize + 14.f * m_dpiScale;
         float textRight = x + w - (isRtl ? (32.f * m_dpiScale) : (20.f * m_dpiScale));
         D2D1_RECT_F tr = D2D1::RectF(textLeft, y + padY + 2.f * m_dpiScale, textRight, y + itemH - padY);
         rt->DrawTextW(item.text.c_str(),
@@ -214,7 +198,7 @@ void LibraryPage::DrawAddModal(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds)
 
     // Modal Card
     float mw = 480.f * m_dpiScale;
-    float mh = 260.f * m_dpiScale;
+    float mh = 220.f * m_dpiScale;
     float mx = bounds.left + (bounds.right - bounds.left - mw) / 2.f;
     float my = bounds.top + (bounds.bottom - bounds.top - mh) / 2.f;
 
@@ -236,7 +220,7 @@ void LibraryPage::DrawAddModal(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds)
     }
 
     // Input Box for Dhikr Text
-    D2D1_RECT_F inR = D2D1::RectF(mx + 20*m_dpiScale, my + 50*m_dpiScale, mx + mw - 20*m_dpiScale, my + 115*m_dpiScale);
+    D2D1_RECT_F inR = D2D1::RectF(mx + 20*m_dpiScale, my + 52*m_dpiScale, mx + mw - 20*m_dpiScale, my + 145*m_dpiScale);
     m_brush->SetColor(ds::Card());
     rt->FillRoundedRectangle(D2D1::RoundedRect(inR, 6.f*m_dpiScale, 6.f*m_dpiScale), m_brush);
     m_brush->SetColor(ds::Accent::Primary(0.6f));
@@ -253,27 +237,6 @@ void LibraryPage::DrawAddModal(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds)
             m_brush->SetColor(ds::TextPrimary());
             std::wstring cursorText = m_inputDhikrText + L"|";
             rt->DrawTextW(cursorText.c_str(), (UINT32)cursorText.size(), m_tfMain, textR, m_brush);
-        }
-    }
-
-    // Repetitions selector
-    if (m_tfCat) {
-        m_brush->SetColor(ds::TextSecondary());
-        std::wstring repLbl = Localization::Instance().Get(L"library.repeat_count") + L":";
-        rt->DrawTextW(repLbl.c_str(), (UINT32)repLbl.size(), m_tfCat, 
-            D2D1::RectF(mx + 20*m_dpiScale, my + 128*m_dpiScale, mx + 120*m_dpiScale, my + 154*m_dpiScale), m_brush);
-
-        int repVals[] = { 1, 3, 33, 100 };
-        float rx = mx + (isRtl ? 180.f*m_dpiScale : 130.f*m_dpiScale);
-        for (int r : repVals) {
-            std::wstring s = L"×" + std::to_wstring(r);
-            D2D1_RECT_F rr = D2D1::RectF(rx, my + 126*m_dpiScale, rx + 44*m_dpiScale, my + 152*m_dpiScale);
-            bool sel = (m_selectedReps == r);
-            m_brush->SetColor(sel ? ds::Accent::Primary() : ds::Card());
-            rt->FillRoundedRectangle(D2D1::RoundedRect(rr, 4.f*m_dpiScale, 4.f*m_dpiScale), m_brush);
-            m_brush->SetColor(sel ? ds::Rgba(0x08,0x0A,0x09) : ds::TextSecondary());
-            rt->DrawTextW(s.c_str(), (UINT32)s.size(), m_tfCat, rr, m_brush);
-            rx += 50.f * m_dpiScale;
         }
     }
 
@@ -442,6 +405,7 @@ void LibraryPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
     rt->PushAxisAlignedClip(clipR, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
     float itemH = 74.f * m_dpiScale + ds::Space::S * m_dpiScale;
+    m_maxScroll = std::max(0.f, (float)filteredIndices.size() * itemH - scrollableH + 16.f * m_dpiScale);
     int maxVisible = (int)(scrollableH / itemH) + 2;
     int startIdx = std::max(0, (int)(m_scrollY / itemH));
 
@@ -520,22 +484,10 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
     // If modal is active, handle modal clicks
     if (m_showAddModal) {
         float mw = 480.f * m_dpiScale;
-        float mh = 260.f * m_dpiScale;
+        float mh = 220.f * m_dpiScale;
         float mx = m_contentX + (m_contentW - mw) / 2.f;
         float my = m_contentY + (500.f * m_dpiScale - mh) / 2.f;
         bool isRtl = Localization::Instance().IsRTL();
-
-        // Repetition pills
-        int repVals[] = { 1, 3, 33, 100 };
-        float rx = mx + (isRtl ? 180.f*m_dpiScale : 130.f*m_dpiScale);
-        for (int r : repVals) {
-            if (x >= rx && x <= rx + 44*m_dpiScale && y >= my + 126*m_dpiScale && y <= my + 152*m_dpiScale) {
-                m_selectedReps = r;
-                MainWindow::Instance().Invalidate();
-                return true;
-            }
-            rx += 50.f * m_dpiScale;
-        }
 
         // Save Button
         float bw = 100.f * m_dpiScale;
@@ -550,7 +502,7 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
                 newItem.text = m_inputDhikrText;
                 newItem.category = "custom";
                 newItem.priority = 1;
-                newItem.repetitions = m_selectedReps;
+                newItem.repetitions = 1;
                 newItem.enabled = true;
                 ContentEngine::Instance().AddItem(newItem);
                 m_inputDhikrText.clear();
@@ -613,6 +565,7 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
         if (x >= px && x <= px + pillW && y >= filterY && y <= filterY + 26.f * m_dpiScale) {
             m_currentFilter = i;
             m_scrollY = 0;
+            m_targetScrollY = 0;
             MainWindow::Instance().Invalidate();
             return true;
         }
@@ -631,6 +584,7 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
         if (r == IDYES) {
             ContentEngine::Instance().ClearAll();
             m_scrollY = 0.f;
+            m_targetScrollY = 0.f;
             MainWindow::Instance().OnSettingsChanged();
             MainWindow::Instance().Invalidate();
         }
@@ -701,20 +655,30 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
 }
 
 bool LibraryPage::OnMouseWheel(int delta) {
-    if (m_contentW == 0 || m_showAddModal) return false;
-    
-    m_scrollY -= delta * 0.5f;
-    if (m_scrollY < 0) m_scrollY = 0;
-    
-    float itemH = 74.f * m_dpiScale + ds::Space::S * m_dpiScale;
-    auto filtered = GetFilteredIndices(m_currentFilter);
-    float totalH = filtered.size() * itemH;
-    float viewH = 600.f * m_dpiScale;
-    
-    float maxScroll = std::max(0.f, totalH - viewH + 200.f*m_dpiScale);
-    if (m_scrollY > maxScroll) m_scrollY = maxScroll;
-    
-    MainWindow::Instance().Invalidate();
+    if (m_contentW == 0 || m_showAddModal || m_maxScroll <= 0.f) return false;
+
+    float scrollStep = (delta / 120.f) * (80.f * m_dpiScale);
+    m_targetScrollY = std::clamp(m_targetScrollY - scrollStep, 0.f, m_maxScroll);
+    float diff = m_targetScrollY - m_scrollY;
+    if (std::abs(diff) < 0.4f) {
+        m_scrollY = m_targetScrollY;
+    } else {
+        m_scrollY += diff * 0.25f;
+    }
+    return true;
+}
+
+bool LibraryPage::OnScrollTick() {
+    m_targetScrollY = std::clamp(m_targetScrollY, 0.f, m_maxScroll);
+    float diff = m_targetScrollY - m_scrollY;
+    if (std::abs(diff) < 0.4f) {
+        if (m_scrollY != m_targetScrollY) {
+            m_scrollY = m_targetScrollY;
+            return true;
+        }
+        return false;
+    }
+    m_scrollY += diff * 0.24f;
     return true;
 }
 

@@ -1,5 +1,7 @@
 #include <QApplication>
+#include <QCoreApplication>
 #include <QFontDatabase>
+#include <QDir>
 #include <iostream>
 
 #include "core/PlatformPaths.h"
@@ -34,6 +36,21 @@ int main(int argc, char* argv[]) {
     dhikr::Logger::Instance().Initialize(dhikr::PlatformPaths::GetLogsDir());
     LOG_INFO("Starting Azkar Reminder v1.2.0 (Qt 6 Cross-Platform)");
 
+    // 1.5 Load bundled Cairo Arabic font if present
+    QString appDir = QCoreApplication::applicationDirPath();
+    QStringList fontCandidates = {
+        appDir + "/../Resources/fonts/Cairo-Regular.ttf",
+        appDir + "/../share/azkar-reminder/fonts/Cairo-Regular.ttf",
+        appDir + "/fonts/Cairo-Regular.ttf",
+        "assets/fonts/Cairo-Regular.ttf"
+    };
+    for (const QString& fontPath : fontCandidates) {
+        if (QFile::exists(fontPath)) {
+            QFontDatabase::addApplicationFont(fontPath);
+            break;
+        }
+    }
+
     // 2. Load Settings & Localization
     dhikr::Settings::Instance().Load(dhikr::PlatformPaths::GetConfigDir());
     dhikr::Localization::Instance().SetLanguage(
@@ -50,16 +67,43 @@ int main(int argc, char* argv[]) {
     auto dbPath = dhikr::PlatformPaths::GetDataDir() / "history.db";
     dhikr::Database::Instance().Open(dbPath);
 
-    // 4. Load Dhikr Content
-    auto dataContent = dhikr::PlatformPaths::GetDataDir() / "content.md";
-    if (std::filesystem::exists(dataContent)) {
-        dhikr::ContentEngine::Instance().Load(dataContent);
-    } else if (std::filesystem::exists("assets/content.md")) {
-        dhikr::ContentEngine::Instance().Load("assets/content.md");
-    } else if (std::filesystem::exists("content.md")) {
-        dhikr::ContentEngine::Instance().Load("content.md");
-    } else {
-        dhikr::ContentEngine::Instance().LoadFromResource();
+    // 4. Load Dhikr Content (with persistent user content.json and embedded fallback)
+    auto userContentJson = dhikr::PlatformPaths::GetDataDir() / "content.json";
+    dhikr::ContentEngine::Instance().SetSavePath(userContentJson);
+
+    dhikr::ContentLoadResult loadRes = dhikr::ContentLoadResult::FileNotFound;
+    if (std::filesystem::exists(userContentJson)) {
+        loadRes = dhikr::ContentEngine::Instance().Load(userContentJson);
+    }
+
+    if (loadRes != dhikr::ContentLoadResult::Success || dhikr::ContentEngine::Instance().IsEmpty()) {
+        std::filesystem::path appDirPath(appDir.toStdString());
+        std::vector<std::filesystem::path> mdCandidates = {
+            dhikr::PlatformPaths::GetDataDir() / "content.md",
+            appDirPath / ".." / "Resources" / "content.md",
+            appDirPath / ".." / "share" / "azkar-reminder" / "content.md",
+            appDirPath / "assets" / "content.md",
+            appDirPath / "content.md",
+            "assets/content.md",
+            "content.md"
+        };
+
+        for (const auto& candidate : mdCandidates) {
+            if (std::filesystem::exists(candidate)) {
+                loadRes = dhikr::ContentEngine::Instance().Load(candidate);
+                if (loadRes == dhikr::ContentLoadResult::Success && !dhikr::ContentEngine::Instance().IsEmpty()) {
+                    break;
+                }
+            }
+        }
+
+        if (loadRes != dhikr::ContentLoadResult::Success || dhikr::ContentEngine::Instance().IsEmpty()) {
+            loadRes = dhikr::ContentEngine::Instance().LoadFromResource();
+        }
+
+        if (loadRes == dhikr::ContentLoadResult::Success && !dhikr::ContentEngine::Instance().IsEmpty()) {
+            dhikr::ContentEngine::Instance().Save();
+        }
     }
 
     // 5. Create UI & Tray

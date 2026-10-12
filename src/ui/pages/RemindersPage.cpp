@@ -621,15 +621,35 @@ bool RemindersPage::OnMouseWheel(int delta) {
     if (maxScroll <= 0) {
         if (m_scrollY != 0) {
             m_scrollY = 0;
+            m_targetScrollY = 0;
             return true;
         }
         return false;
     }
-    float oldScroll = m_scrollY;
-    m_scrollY -= (delta / 120.f) * (40.f * m_dpiScale);
-    if (m_scrollY < 0) m_scrollY = 0;
-    if (m_scrollY > maxScroll) m_scrollY = maxScroll;
-    return (m_scrollY != oldScroll);
+    float scrollStep = (delta / 120.f) * (64.f * m_dpiScale);
+    m_targetScrollY = std::clamp(m_targetScrollY - scrollStep, 0.f, maxScroll);
+    float diff = m_targetScrollY - m_scrollY;
+    if (std::abs(diff) < 0.4f) {
+        m_scrollY = m_targetScrollY;
+    } else {
+        m_scrollY += diff * 0.25f;
+    }
+    return true;
+}
+
+bool RemindersPage::OnScrollTick() {
+    float maxScroll = std::max(0.f, m_totalContentH - m_viewH + 20.f * m_dpiScale);
+    m_targetScrollY = std::clamp(m_targetScrollY, 0.f, maxScroll);
+    float diff = m_targetScrollY - m_scrollY;
+    if (std::abs(diff) < 0.4f) {
+        if (m_scrollY != m_targetScrollY) {
+            m_scrollY = m_targetScrollY;
+            return true;
+        }
+        return false;
+    }
+    m_scrollY += diff * 0.24f;
+    return true;
 }
 
 bool RemindersPage::OnLButtonDown(int x, int y) {

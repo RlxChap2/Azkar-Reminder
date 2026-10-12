@@ -21,8 +21,8 @@ public:
 
     bool Create(HINSTANCE hInstance);
 
-    // Show with given content item
-    void Show(const ContentItem* item);
+    // Show with given content item (force=true bypasses visibility checks for previews)
+    void Show(const ContentItem* item, bool force = false);
 
     // Hide immediately
     void Hide();

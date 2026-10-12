@@ -18,7 +18,8 @@ public:
     void OnSettingsChanged() override;
     void OnActivated() override;
     float GetScrollY() const override { return m_scrollY; }
-    void SetScrollY(float y) override { m_scrollY = y; }
+    void SetScrollY(float y) override { m_scrollY = y; m_targetScrollY = y; }
+    bool OnScrollTick() override;
 
 private:
     void DrawToggle(ID2D1RenderTarget* rt, float x, float y, bool on, bool hover);
@@ -45,6 +46,7 @@ private:
     float m_viewH = 0;
     float m_totalContentH = 0;
     float m_scrollY = 0.f;
+    float m_targetScrollY = 0.f;
 
     bool  m_hoverToggle  = false;
     bool  m_hoverSave    = false;

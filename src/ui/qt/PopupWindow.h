@@ -6,8 +6,8 @@
 #include <QProgressBar>
 #include <QTimer>
 #include <QPropertyAnimation>
-#include <QGraphicsOpacityEffect>
 #include <QParallelAnimationGroup>
+#include <QPointer>
 #include "../../core/ContentEngine.h"
 #include "../../core/Settings.h"
 
@@ -33,13 +33,13 @@ protected:
 
 private slots:
     void OnTimerTick();
-    void OnCounterClicked();
     void OnCopyClicked();
     void OnPauseClicked();
     void OnThemeChanged();
 
 private:
     void SetupUi();
+    void StopActiveAnimations();
     void PositionWindow();
     void StartEntranceAnimation();
     void StartExitAnimation();
@@ -50,28 +50,23 @@ private:
     QLabel*       m_lblSource = nullptr;
     QLabel*       m_lblArabic = nullptr;
     QLabel*       m_lblTransliteration = nullptr;
-    QLabel*       m_lblDescription = nullptr;
-    QPushButton*  m_btnCounter = nullptr;
     QPushButton*  m_btnCopy = nullptr;
     QPushButton*  m_btnPause = nullptr;
     QPushButton*  m_btnClose = nullptr;
     QProgressBar* m_progress = nullptr;
 
     // Animation & State
-    QGraphicsOpacityEffect* m_opacityEffect = nullptr;
-    QPropertyAnimation*     m_animOpacity = nullptr;
-    QPropertyAnimation*     m_animGeometry = nullptr;
-    QParallelAnimationGroup* m_animGroup = nullptr;
+    QPointer<QParallelAnimationGroup> m_animGroup;
+    QPointer<QPropertyAnimation>      m_exitAnim;
+    QRect                             m_targetGeometry;
 
     QTimer* m_dismissTimer = nullptr;
     int     m_elapsedSec = 0;
     int     m_totalDurationSec = 15;
     bool    m_isPausedByHover = false;
 
-    // Current item data
+    // Current item data (stored by value to prevent dangling pointers if deleted)
     ContentItem m_currentItem;
-    int         m_currentRepetitions = 0;
-    int         m_targetRepetitions = 1;
 };
 
 } // namespace dhikr::qt

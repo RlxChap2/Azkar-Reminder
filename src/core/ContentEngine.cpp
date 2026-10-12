@@ -1,4 +1,5 @@
 #include "ContentEngine.h"
+#include "EmbeddedContent.h"
 #include "Logger.h"
 #include "Database.h"
 #ifdef _WIN32
@@ -155,16 +156,19 @@ ContentLoadResult ContentEngine::Load(const std::filesystem::path& contentFilePa
 
 ContentLoadResult ContentEngine::LoadFromResource() {
 #ifdef _WIN32
-    return LoadFromMarkdownResource(nullptr, IDR_CONTENT_MD);
+    auto res = LoadFromMarkdownResource(nullptr, IDR_CONTENT_MD);
+    if (res == ContentLoadResult::Success) return res;
 #else
     if (std::filesystem::exists("assets/content.md")) {
-        return LoadFromMarkdownFile(std::filesystem::path("assets/content.md"));
+        auto res = LoadFromMarkdownFile(std::filesystem::path("assets/content.md"));
+        if (res == ContentLoadResult::Success) return res;
     }
     if (std::filesystem::exists("content.md")) {
-        return LoadFromMarkdownFile(std::filesystem::path("content.md"));
+        auto res = LoadFromMarkdownFile(std::filesystem::path("content.md"));
+        if (res == ContentLoadResult::Success) return res;
     }
-    return ContentLoadResult::FileNotFound;
 #endif
+    return LoadFromMarkdownString(kEmbeddedContentMd);
 }
 
 #ifdef _WIN32
@@ -172,8 +176,7 @@ ContentLoadResult ContentEngine::LoadFromMarkdownResource(HINSTANCE hInstance, i
     if (!hInstance) hInstance = GetModuleHandleW(nullptr);
     HRSRC hRes = FindResourceW(hInstance, MAKEINTRESOURCEW(resourceId), RT_RCDATA);
     if (!hRes) {
-        m_lastError = L"Embedded content resource not found";
-        return ContentLoadResult::FileNotFound;
+        return LoadFromMarkdownString(kEmbeddedContentMd);
     }
     HGLOBAL hData = LoadResource(hInstance, hRes);
     if (!hData) {

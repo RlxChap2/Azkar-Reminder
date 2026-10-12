@@ -33,6 +33,7 @@ public:
 
 public slots:
     void TriggerReminder();
+    void TriggerPreview();
     void RefreshDashboardStats();
 
 protected:
@@ -45,10 +46,13 @@ private slots:
     void OnQuickPauseClicked(int minutes);
     void OnResumeClicked();
     void OnLanguageToggle();
+    void OnAddCustomDhikr();
+    void OnDeleteSelectedDhikr();
 
 private:
     void SetupUi();
     void SetupSidebar();
+    void PopulateLibraryList();
     QWidget* CreateHomePage();
     QWidget* CreateRemindersPage();
     QWidget* CreateLibraryPage();
@@ -90,14 +94,16 @@ private:
     QLineEdit*   m_txtSearch = nullptr;
     QListWidget* m_listContent = nullptr;
     QComboBox*   m_comboCategory = nullptr;
+    QPushButton* m_btnAddDhikr = nullptr;
+    QPushButton* m_btnDeleteDhikr = nullptr;
 
     // Settings Page Widgets
-    QComboBox*  m_comboTheme = nullptr;
-    QComboBox*  m_comboAnimation = nullptr;
-    QComboBox*  m_comboAnimSpeed = nullptr;
-    QSlider*    m_sliderDuration = nullptr;
-    QLabel*     m_lblDurationValue = nullptr;
-    QCheckBox*  m_chkAutostart = nullptr;
+    QComboBox*   m_comboTheme = nullptr;
+    QComboBox*   m_comboAnimation = nullptr;
+    QComboBox*   m_comboAnimSpeed = nullptr;
+    QSlider*     m_sliderDuration = nullptr;
+    QLabel*      m_lblDurationValue = nullptr;
+    QCheckBox*   m_chkAutostart = nullptr;
     QPushButton* m_btnLanguage = nullptr;
 };
 

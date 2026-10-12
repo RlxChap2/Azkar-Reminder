@@ -71,7 +71,18 @@ SettingsPage::SettingsPage() {
         m_tfSection->SetTextAlignment(isRtl ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING);
         m_tfSection->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
+    if (m_tfLabel) {
+        m_tfLabel->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+        m_tfLabel->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        m_tfLabel->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+    if (m_tfValue) {
+        m_tfValue->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+        m_tfValue->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        m_tfValue->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
 
+    m_cachedMonitors = PopupWindow::EnumerateMonitors();
     m_pendingSettings = Settings::Instance().GetCopy();
     m_hasUnsavedChanges = false;
 }
@@ -110,8 +121,6 @@ void SettingsPage::DrawSectionHeader(ID2D1RenderTarget* rt, float x, float& y, f
             rt->DrawTextW(iconGlyph, (UINT32)wcslen(iconGlyph), m_tfSectionIcon, iconR, m_brush);
         }
         D2D1_RECT_F textR = D2D1::RectF(x, y, x + w - iconSize - gap, y + headerH);
-        m_tfSection->SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
-        m_tfSection->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         rt->DrawTextW(title.c_str(), (UINT32)title.size(), m_tfSection, textR, m_brush);
     } else {
         D2D1_RECT_F iconR = D2D1::RectF(x, y, x + iconSize, y + headerH);
@@ -119,8 +128,6 @@ void SettingsPage::DrawSectionHeader(ID2D1RenderTarget* rt, float x, float& y, f
             rt->DrawTextW(iconGlyph, (UINT32)wcslen(iconGlyph), m_tfSectionIcon, iconR, m_brush);
         }
         D2D1_RECT_F textR = D2D1::RectF(x + iconSize + gap, y, x + w, y + headerH);
-        m_tfSection->SetReadingDirection(DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
-        m_tfSection->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         rt->DrawTextW(title.c_str(), (UINT32)title.size(), m_tfSection, textR, m_brush);
     }
 
@@ -165,16 +172,14 @@ void SettingsPage::DrawToggle(ID2D1RenderTarget* rt, float x, float y, bool on, 
 
 void SettingsPage::DrawLabel(ID2D1RenderTarget* rt, float x, float y, const wchar_t* text, float controlReserveW) {
     if (!m_tfLabel || !m_brush) return;
+    float labelH = 26.f * m_dpiScale;
+    if (y + labelH < m_contentY - 10.f || y > m_contentY + m_viewportH + 10.f) return;
+
     m_brush->SetColor(ds::TextPrimary());
-    m_tfLabel->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
     bool isRtl = Localization::Instance().IsRTL();
     float ctrl = controlReserveW * m_dpiScale;
     float gap  = 16.f * m_dpiScale;
-    float labelH = 26.f * m_dpiScale;
-
-    m_tfLabel->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
-    m_tfLabel->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
     float lx, lRight;
     if (isRtl) {
@@ -190,6 +195,7 @@ void SettingsPage::DrawLabel(ID2D1RenderTarget* rt, float x, float y, const wcha
 }
 
 void SettingsPage::DrawDropdown(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const wchar_t* val, bool hover) {
+    if (r.bottom < m_contentY - 10.f || r.top > m_contentY + m_viewportH + 10.f) return;
     float rx = ds::Dims::InputRadius * m_dpiScale;
     bool isRtl = Localization::Instance().IsRTL();
     m_brush->SetColor(hover ? ds::CardHover() : ds::Card());
@@ -198,9 +204,6 @@ void SettingsPage::DrawDropdown(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, con
     rt->DrawRoundedRectangle(D2D1::RoundedRect(r, rx, rx), m_brush, 1.0f);
     if (m_tfValue) {
         m_brush->SetColor(ds::TextPrimary());
-        m_tfValue->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
-        m_tfValue->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        m_tfValue->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         D2D1_RECT_F tr = isRtl
             ? D2D1::RectF(r.left + 28*m_dpiScale, r.top, r.right - 14*m_dpiScale, r.bottom)
             : D2D1::RectF(r.left + 14*m_dpiScale, r.top, r.right - 28*m_dpiScale, r.bottom);
@@ -413,6 +416,7 @@ void SettingsPage::DrawColorThemeSelector(ID2D1RenderTarget* rt, float x, float 
 
 void SettingsPage::CommitSettings(bool notifyLanguage) {
     float savedScroll = m_scrollY;
+    float savedTarget = m_targetScrollY;
     Settings::Instance().Update(m_pendingSettings);
     Settings::Instance().Save();
     if (notifyLanguage) {
@@ -421,6 +425,7 @@ void SettingsPage::CommitSettings(bool notifyLanguage) {
     m_hasUnsavedChanges = false;
     MainWindow::Instance().OnSettingsChanged();
     m_scrollY = savedScroll;
+    m_targetScrollY = savedTarget;
     Scheduler::Instance().Recalculate();
     MainWindow::Instance().Invalidate();
 }
@@ -430,9 +435,20 @@ void SettingsPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
 
     bool isRtl = Localization::Instance().IsRTL();
     if (m_tfTitle)   m_tfTitle->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
-    if (m_tfSection) m_tfSection->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
-    if (m_tfLabel)   m_tfLabel->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
-    if (m_tfValue)   m_tfValue->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+    if (m_tfSection) {
+        m_tfSection->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+        m_tfSection->SetTextAlignment(isRtl ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING);
+    }
+    if (m_tfLabel) {
+        m_tfLabel->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+        m_tfLabel->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        m_tfLabel->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+    if (m_tfValue) {
+        m_tfValue->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+        m_tfValue->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        m_tfValue->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
     if (m_tfBtn)     m_tfBtn->SetReadingDirection(isRtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT : DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
 
     float pad = ds::Space::XL * m_dpiScale;
@@ -503,7 +519,10 @@ void SettingsPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
     DrawSectionHeader(rt, x, curY, w, L"settings.popup", ds::Icon::Monitor);
 
     // Multi-Monitor Target Selector
-    auto monitors = PopupWindow::EnumerateMonitors();
+    if (m_cachedMonitors.empty()) {
+        m_cachedMonitors = PopupWindow::EnumerateMonitors();
+    }
+    const auto& monitors = m_cachedMonitors;
     std::wstring monDisplay;
     if (m_pendingSettings.popupMonitor == PopupMonitor::Primary) {
         monDisplay = Localization::Instance().Get(L"settings.monitor_primary");
@@ -639,11 +658,6 @@ void SettingsPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
     // Show Tashkeel
     DrawLabel(rt, x, curY + 4*m_dpiScale, Localization::Instance().Get(L"settings.show_tashkeel").c_str(), togW);
     DrawToggle(rt, ctrlX(togW), curY, m_pendingSettings.showTashkeel, m_hoveredElement == 41);
-    curY += rowH;
-
-    // Show Counter Pill
-    DrawLabel(rt, x, curY + 4*m_dpiScale, Localization::Instance().Get(L"settings.show_counter").c_str(), togW);
-    DrawToggle(rt, ctrlX(togW), curY, m_pendingSettings.showCounterPill, m_hoveredElement == 42);
     curY += rowH;
 
     // Show Hadith Source & Virtue
@@ -870,10 +884,28 @@ void SettingsPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
 
 bool SettingsPage::OnMouseWheel(int delta) {
     if (m_maxScroll <= 0.f) return false;
-    float scrollStep = 55.f * m_dpiScale;
-    m_scrollY -= (delta > 0 ? 1.f : -1.f) * scrollStep;
-    m_scrollY = std::clamp(m_scrollY, 0.f, m_maxScroll);
-    MainWindow::Instance().Invalidate();
+    float scrollStep = (delta / 120.f) * (72.f * m_dpiScale);
+    m_targetScrollY = std::clamp(m_targetScrollY - scrollStep, 0.f, m_maxScroll);
+    float diff = m_targetScrollY - m_scrollY;
+    if (std::abs(diff) < 0.4f) {
+        m_scrollY = m_targetScrollY;
+    } else {
+        m_scrollY += diff * 0.25f;
+    }
+    return true;
+}
+
+bool SettingsPage::OnScrollTick() {
+    m_targetScrollY = std::clamp(m_targetScrollY, 0.f, m_maxScroll);
+    float diff = m_targetScrollY - m_scrollY;
+    if (std::abs(diff) < 0.4f) {
+        if (m_scrollY != m_targetScrollY) {
+            m_scrollY = m_targetScrollY;
+            return true;
+        }
+        return false;
+    }
+    m_scrollY += diff * 0.24f;
     return true;
 }
 
@@ -1259,15 +1291,6 @@ bool SettingsPage::OnLButtonDown(int x, int y) {
     }
     curY += rowH;
 
-    // Show Counter Pill Toggle
-    float cntX = ctrlLeft(togW);
-    if (x >= cntX && x <= cntX + togW * m_dpiScale && vy >= curY && vy <= curY + ds::Dims::ToggleH * m_dpiScale) {
-        m_pendingSettings.showCounterPill = !m_pendingSettings.showCounterPill;
-        CommitSettings(false);
-        return true;
-    }
-    curY += rowH;
-
     // Show Hadith Source & Virtue Toggle
     float srcX = ctrlLeft(togW);
     if (x >= srcX && x <= srcX + togW * m_dpiScale && vy >= curY && vy <= curY + ds::Dims::ToggleH * m_dpiScale) {
@@ -1634,10 +1657,6 @@ bool SettingsPage::OnMouseMove(int x, int y) {
         if (x >= tskX && x <= tskX + togW * m_dpiScale && vy >= curY && vy <= curY + ds::Dims::ToggleH * m_dpiScale) m_hoveredElement = 41;
         curY += rowH;
 
-        float cntX = ctrlLeft(togW);
-        if (x >= cntX && x <= cntX + togW * m_dpiScale && vy >= curY && vy <= curY + ds::Dims::ToggleH * m_dpiScale) m_hoveredElement = 42;
-        curY += rowH;
-
         float srcX = ctrlLeft(togW);
         if (x >= srcX && x <= srcX + togW * m_dpiScale && vy >= curY && vy <= curY + ds::Dims::ToggleH * m_dpiScale) m_hoveredElement = 43;
         curY += rowH + 10.f * m_dpiScale;
@@ -1726,12 +1745,14 @@ void SettingsPage::OnMouseLeave() {
 }
 
 void SettingsPage::OnSettingsChanged() {
+    m_cachedMonitors = PopupWindow::EnumerateMonitors();
     if (!m_hasUnsavedChanges) {
         m_pendingSettings = Settings::Instance().GetCopy();
     }
 }
 
 void SettingsPage::OnActivated() {
+    m_cachedMonitors = PopupWindow::EnumerateMonitors();
     m_pendingSettings = Settings::Instance().GetCopy();
     m_hasUnsavedChanges = false;
     // Note: m_scrollY is preserved across page activations so the user never loses their position

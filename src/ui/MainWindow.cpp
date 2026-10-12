@@ -703,12 +703,9 @@ LRESULT MainWindow::OnCommand(WPARAM wp) {
 
 LRESULT MainWindow::OnReminder(bool forcePreview) {
     if (forcePreview) {
-        if (PopupWindow::Instance().IsVisible()) {
-            PopupWindow::Instance().Hide();
-        }
         auto* item = ContentEngine::Instance().GetNext();
         if (item) {
-            PopupWindow::Instance().Show(item);
+            PopupWindow::Instance().Show(item, true /* force */);
         }
         return 0;
     }
@@ -933,6 +930,17 @@ LRESULT MainWindow::OnTimer(UINT_PTR timerId) {
         }
         return 0;
     }
+    if (timerId == 1006 /* TIMER_SMOOTH_SCROLL */) {
+        if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
+            if (m_pages[m_activePage]->OnScrollTick()) {
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                UpdateWindow(m_hwnd);
+                return 0;
+            }
+        }
+        KillTimer(m_hwnd, 1006);
+        return 0;
+    }
     return 0;
 }
 
@@ -973,9 +981,15 @@ LRESULT MainWindow::OnMouseLeave() {
 LRESULT MainWindow::OnMouseWheel(int delta) {
     bool needsRepaint = false;
     if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
-        if (m_pages[m_activePage]->OnMouseWheel(delta)) needsRepaint = true;
+        if (m_pages[m_activePage]->OnMouseWheel(delta)) {
+            needsRepaint = true;
+            SetTimer(m_hwnd, 1006 /* TIMER_SMOOTH_SCROLL */, 8, nullptr);
+        }
     }
-    if (needsRepaint) InvalidateRect(m_hwnd, nullptr, FALSE);
+    if (needsRepaint) {
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        UpdateWindow(m_hwnd);
+    }
     return 0;
 }
 

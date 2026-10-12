@@ -6,6 +6,10 @@
 #include "../../core/Settings.h"
 #include "../../core/PlatformPaths.h"
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 namespace dhikr {
 
 #ifndef _WIN32
@@ -74,7 +78,34 @@ std::filesystem::path MiniAudioEngine::ResolveSoundFilePath() const {
     auto dataDirAudio = PlatformPaths::GetDataDir() / "audio" / "diode_matrix.mp3";
     if (std::filesystem::exists(dataDirAudio)) return dataDirAudio;
 
-    // 3. Local relative paths
+    // 3. Executable-relative bundle paths (macOS .app Resources & Linux AppImage /usr/share)
+#ifdef __APPLE__
+    char exeBuf[1024] = {};
+    uint32_t bufSize = sizeof(exeBuf);
+    if (_NSGetExecutablePath(exeBuf, &bufSize) == 0) {
+        std::error_code ec;
+        auto exeDir = std::filesystem::weakly_canonical(std::filesystem::path(exeBuf), ec).parent_path();
+        auto bundleAudio = exeDir / ".." / "Resources" / "audio" / "diode_matrix.mp3";
+        if (std::filesystem::exists(bundleAudio)) return bundleAudio;
+        auto sibAudio = exeDir / "audio" / "diode_matrix.mp3";
+        if (std::filesystem::exists(sibAudio)) return sibAudio;
+    }
+#elif defined(__linux__)
+    std::error_code ec;
+    auto exePath = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec) {
+        auto exeDir = exePath.parent_path();
+        auto appImageAudio = exeDir / ".." / "share" / "azkar-reminder" / "audio" / "diode_matrix.mp3";
+        if (std::filesystem::exists(appImageAudio)) return appImageAudio;
+        auto sibAudio = exeDir / "audio" / "diode_matrix.mp3";
+        if (std::filesystem::exists(sibAudio)) return sibAudio;
+    }
+    if (std::filesystem::exists("/usr/share/azkar-reminder/audio/diode_matrix.mp3")) {
+        return "/usr/share/azkar-reminder/audio/diode_matrix.mp3";
+    }
+#endif
+
+    // 4. Local relative paths
     if (std::filesystem::exists("audio/diode_matrix.mp3")) return "audio/diode_matrix.mp3";
     if (std::filesystem::exists("assets/audio/diode_matrix.mp3")) return "assets/audio/diode_matrix.mp3";
     if (std::filesystem::exists("../assets/audio/diode_matrix.mp3")) return "../assets/audio/diode_matrix.mp3";

@@ -5,6 +5,10 @@
 #include <cstring>
 #include <chrono>
 
+#ifdef _WIN32
+#include "../resource.h"
+#endif
+
 namespace dhikr {
 
 static inline void SafeLocalTime(struct tm* tm, const time_t* time) {
@@ -34,7 +38,7 @@ void Scheduler::Start(HWND hwnd) {
     m_hwnd = hwnd;
     Start([hwnd]() {
         if (hwnd) {
-            PostMessageW(hwnd, WM_APP + 1 /* WM_REMINDER_TRIGGER */, 0, 0);
+            PostMessageW(hwnd, WM_REMINDER_TRIGGER, 0, 0);
         }
     });
 }
@@ -67,7 +71,7 @@ void Scheduler::TriggerNow() {
     m_lastFiredTime = time(nullptr);
 #ifdef _WIN32
     if (m_hwnd) {
-        PostMessageW(m_hwnd, WM_APP + 1 /* WM_REMINDER_TRIGGER */, 1, 0);
+        PostMessageW(m_hwnd, WM_REMINDER_TRIGGER, 1, 0);
         return;
     }
 #endif
@@ -151,58 +155,78 @@ void Scheduler::OnSystemWake() {
 // ── Worker thread (C++20 condition_variable) ──────────────────────────────────
 void Scheduler::WorkerThread() {
     while (m_running) {
-        time_t nextFire = ComputeNextReminderTime();
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_nextFire = nextFire;
-        }
-
-        std::unique_lock<std::mutex> lock(m_mutex);
-        if (nextFire == 0) {
-            // No reminder scheduled in current window — sleep until wake or recalc
-            m_cv.wait(lock, [this]() { return !m_running || m_recalcRequested; });
-            m_recalcRequested = false;
-            if (!m_running) break;
-            continue;
-        }
-
-        auto targetPoint = std::chrono::system_clock::from_time_t(nextFire);
-        bool timeoutReached = !m_cv.wait_until(lock, targetPoint, [this]() {
-            return !m_running || m_recalcRequested;
-        });
-
-        if (!m_running) break;
-
-        if (m_recalcRequested) {
-            m_recalcRequested = false;
-            continue;
-        }
-
-        if (timeoutReached) {
-            // Timer fired — check if pause expired
-            if (m_pauseUntil != 0 && time(nullptr) >= m_pauseUntil) {
-                m_pauseUntil = 0;
-                auto& s = Settings::Instance().Get();
-                s.paused = false;
-                s.pauseUntilUnix = 0;
-                Settings::Instance().Save();
-                Settings::Instance().NotifyChanged();
+        try {
+            time_t nextFire = ComputeNextReminderTime();
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_nextFire = nextFire;
             }
 
-            // Verify reminder can trigger
-            auto& s = Settings::Instance().Get();
-            if (s.remindersEnabled && !IsPaused()) {
-                time_t nowT = time(nullptr);
-                if (nowT - m_lastFiredTime.load() >= 20) {
-                    m_lastFiredTime = nowT;
-                    auto callback = m_onTrigger;
-                    lock.unlock(); // Unlock while dispatching event
-                    if (callback) {
-                        callback();
+            std::unique_lock<std::mutex> lock(m_mutex);
+            if (nextFire == 0) {
+                // No reminder scheduled in current window — sleep until wake or recalc
+                m_cv.wait(lock, [this]() { return !m_running || m_recalcRequested; });
+                m_recalcRequested = false;
+                if (!m_running) break;
+                continue;
+            }
+
+            auto targetPoint = std::chrono::system_clock::from_time_t(nextFire);
+            bool timeoutReached = !m_cv.wait_until(lock, targetPoint, [this]() {
+                return !m_running || m_recalcRequested;
+            });
+
+            if (!m_running) break;
+
+            if (m_recalcRequested) {
+                m_recalcRequested = false;
+                continue;
+            }
+
+            if (timeoutReached) {
+                bool pauseExpired = false;
+                if (m_pauseUntil != 0 && time(nullptr) >= m_pauseUntil) {
+                    m_pauseUntil = 0;
+                    m_state = ScheduleState::Active;
+                    pauseExpired = true;
+                }
+
+                bool isPaused = (m_pauseUntil != 0 && time(nullptr) < m_pauseUntil);
+                auto callback = m_onTrigger;
+                lock.unlock(); // Release mutex before calling Settings or dispatching UI callback
+
+                if (pauseExpired) {
+                    auto& s = Settings::Instance().Get();
+                    s.paused = false;
+                    s.pauseUntilUnix = 0;
+                    Settings::Instance().Save();
+                    Settings::Instance().NotifyChanged();
+                }
+
+                // Verify reminder can trigger
+                auto& s = Settings::Instance().Get();
+                if (s.remindersEnabled && !isPaused) {
+                    time_t nowT = time(nullptr);
+                    if (nowT - m_lastFiredTime.load() >= 20) {
+                        m_lastFiredTime = nowT;
+                        if (callback) {
+                            try {
+                                callback();
+                            } catch (const std::exception& e) {
+                                LOG_ERROR("Scheduler callback error: " + std::string(e.what()));
+                            } catch (...) {
+                                LOG_ERROR("Scheduler callback unknown error");
+                            }
+                        }
                     }
-                    lock.lock();
                 }
             }
+        } catch (const std::exception& ex) {
+            LOG_ERROR("Scheduler worker thread exception: " + std::string(ex.what()));
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        } catch (...) {
+            LOG_ERROR("Scheduler worker thread unknown exception");
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 }

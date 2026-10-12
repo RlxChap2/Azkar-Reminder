@@ -1,5 +1,6 @@
 #pragma once
 #include "../MainWindow.h"
+#include "../PopupWindow.h"
 #include "../components/DropdownPopup.h"
 #include "../../core/Logger.h"
 #include <vector>
@@ -21,7 +22,8 @@ public:
     void OnSettingsChanged() override;
     void OnActivated() override;
     float GetScrollY() const override { return m_scrollY; }
-    void SetScrollY(float y) override { m_scrollY = y; }
+    void SetScrollY(float y) override { m_scrollY = y; m_targetScrollY = y; }
+    bool OnScrollTick() override;
 
 private:
     void DrawSectionHeader(ID2D1RenderTarget* rt, float x, float& y, float w, const wchar_t* locKey, const wchar_t* icon);
@@ -43,9 +45,11 @@ private:
     float m_contentX=0, m_contentY=0, m_contentW=0;
     float m_viewportH   = 0.f;
     float m_scrollY     = 0.f;
+    float m_targetScrollY = 0.f;
     float m_maxScroll   = 0.f;
     bool  m_hoveredSave = false;
 
+    std::vector<PopupWindow::MonitorInfo> m_cachedMonitors;
     AppSettings m_pendingSettings;
     bool m_hasUnsavedChanges = false;
 

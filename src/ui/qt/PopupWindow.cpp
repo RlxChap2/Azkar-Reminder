@@ -10,11 +10,15 @@
 #include <QPainterPath>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QCursor>
 #include <QClipboard>
 #include <QToolTip>
 #include <QEasingCurve>
 
 namespace dhikr::qt {
+
+static constexpr int kPopupWidth  = 420;
+static constexpr int kPopupHeight = 195;
 
 PopupWindow::PopupWindow(QWidget* parent)
     : QWidget(parent) {
@@ -24,23 +28,23 @@ PopupWindow::PopupWindow(QWidget* parent)
 
     SetupUi();
 
-    m_opacityEffect = new QGraphicsOpacityEffect(this);
-    setGraphicsEffect(m_opacityEffect);
-
     m_dismissTimer = new QTimer(this);
     connect(m_dismissTimer, &QTimer::timeout, this, &PopupWindow::OnTimerTick);
 
     connect(&ThemeManager::Instance(), &ThemeManager::ThemeChanged, this, &PopupWindow::OnThemeChanged);
 }
 
-PopupWindow::~PopupWindow() = default;
+PopupWindow::~PopupWindow() {
+    StopActiveAnimations();
+}
 
 void PopupWindow::SetupUi() {
-    setFixedSize(420, 240);
+    resize(kPopupWidth, kPopupHeight);
+    setMinimumSize(320, 140);
 
     auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(18, 16, 18, 14);
-    rootLayout->setSpacing(10);
+    rootLayout->setContentsMargins(18, 14, 18, 14);
+    rootLayout->setSpacing(8);
 
     // ── Header: Badges & Controls ──
     auto* headerLayout = new QHBoxLayout();
@@ -81,11 +85,11 @@ void PopupWindow::SetupUi() {
 
     rootLayout->addLayout(headerLayout);
 
-    // ── Dhikr Arabic Text ──
+    // ── Dhikr Arabic Text (Centered, Clean, No Counter Pill) ──
     m_lblArabic = new QLabel(this);
     m_lblArabic->setObjectName("DhikrArabic");
     m_lblArabic->setFont(ThemeManager::Instance().ArabicFont(17, true));
-    m_lblArabic->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_lblArabic->setAlignment(Qt::AlignCenter);
     m_lblArabic->setWordWrap(true);
     m_lblArabic->setLayoutDirection(Qt::RightToLeft);
     rootLayout->addWidget(m_lblArabic, 1);
@@ -94,20 +98,11 @@ void PopupWindow::SetupUi() {
     m_lblTransliteration = new QLabel(this);
     m_lblTransliteration->setObjectName("DhikrTranslation");
     m_lblTransliteration->setFont(ThemeManager::Instance().UiFont(10, false));
-    m_lblTransliteration->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_lblTransliteration->setAlignment(Qt::AlignCenter);
     m_lblTransliteration->setWordWrap(true);
     rootLayout->addWidget(m_lblTransliteration);
 
-    // ── Bottom: Counter & Progress ──
-    auto* bottomLayout = new QHBoxLayout();
-    bottomLayout->setSpacing(10);
-
-    m_btnCounter = new QPushButton(this);
-    m_btnCounter->setFixedHeight(32);
-    m_btnCounter->setFont(ThemeManager::Instance().UiFont(10, true));
-    connect(m_btnCounter, &QPushButton::clicked, this, &PopupWindow::OnCounterClicked);
-    bottomLayout->addWidget(m_btnCounter);
-
+    // ── Bottom: Slim Auto-Dismiss Progress Bar Only ──
     m_progress = new QProgressBar(this);
     m_progress->setFixedHeight(4);
     m_progress->setTextVisible(false);
@@ -115,9 +110,22 @@ void PopupWindow::SetupUi() {
         QProgressBar { background: #283029; border: none; border-radius: 2px; }
         QProgressBar::chunk { background: #B7F34A; border-radius: 2px; }
     )");
-    bottomLayout->addWidget(m_progress, 1);
+    rootLayout->addWidget(m_progress);
+}
 
-    rootLayout->addLayout(bottomLayout);
+void PopupWindow::StopActiveAnimations() {
+    if (m_animGroup) {
+        m_animGroup->disconnect(this);
+        m_animGroup->stop();
+        m_animGroup->deleteLater();
+        m_animGroup.clear();
+    }
+    if (m_exitAnim) {
+        m_exitAnim->disconnect(this);
+        m_exitAnim->stop();
+        m_exitAnim->deleteLater();
+        m_exitAnim.clear();
+    }
 }
 
 void PopupWindow::OnThemeChanged() {
@@ -131,42 +139,41 @@ void PopupWindow::OnThemeChanged() {
 }
 
 void PopupWindow::ShowReminder(const ContentItem& item) {
+    m_dismissTimer->stop();
+    StopActiveAnimations();
+
+    // Store by value so deleting custom dhikr while popup is open is 100% safe
     m_currentItem = item;
-    m_currentRepetitions = 0;
-    m_targetRepetitions = (item.repetitions > 1) ? item.repetitions : 1;
+    m_isPausedByHover = false;
+
+    const auto& s = Settings::Instance().Get();
 
     m_lblCategory->setText(QString::fromStdString(item.category));
-    m_lblSource->setText(QString::fromStdWString(item.source));
+    m_lblSource->setText(s.showSource ? QString::fromStdWString(item.source) : QString());
     m_lblArabic->setText(QString::fromStdWString(item.text));
 
-    if (!item.transliteration.empty()) {
+    if (s.showSource && !item.transliteration.empty()) {
         m_lblTransliteration->setText(QString::fromStdWString(item.transliteration));
         m_lblTransliteration->setVisible(true);
-    } else if (!item.description.empty()) {
+    } else if (s.showSource && !item.description.empty()) {
         m_lblTransliteration->setText(QString::fromStdWString(item.description));
         m_lblTransliteration->setVisible(true);
     } else {
         m_lblTransliteration->setVisible(false);
     }
 
-    if (m_targetRepetitions > 1) {
-        m_btnCounter->setText(QString("0 / %1").arg(m_targetRepetitions));
-        m_btnCounter->setVisible(true);
-    } else {
-        m_btnCounter->setText(QString::fromUtf8("✓ تم القراءة"));
-        m_btnCounter->setVisible(true);
-    }
-
     OnThemeChanged();
 
-    m_totalDurationSec = Settings::Instance().Get().popupDurationSec;
-    if (m_totalDurationSec <= 0) m_totalDurationSec = 15;
+    m_totalDurationSec = s.popupDurationSec;
+    if (m_totalDurationSec <= 0) m_totalDurationSec = 5;
     m_elapsedSec = 0;
     m_progress->setRange(0, m_totalDurationSec * 10);
     m_progress->setValue(m_totalDurationSec * 10);
 
     PositionWindow();
+    setWindowOpacity(1.0);
     show();
+    raise();
     StartEntranceAnimation();
 
     m_dismissTimer->start(100);
@@ -176,92 +183,147 @@ void PopupWindow::ShowReminder(const ContentItem& item) {
 }
 
 void PopupWindow::PositionWindow() {
-    QScreen* screen = QGuiApplication::primaryScreen();
+    const auto& s = Settings::Instance().Get();
+    QScreen* screen = nullptr;
+    if (s.popupMonitor == PopupMonitor::Active) {
+        screen = QGuiApplication::screenAt(QCursor::pos());
+    } else if (s.popupMonitor == PopupMonitor::Specific) {
+        auto screens = QGuiApplication::screens();
+        if (s.specificMonitor >= 0 && s.specificMonitor < screens.size()) {
+            screen = screens[s.specificMonitor];
+        }
+    }
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
+
+    int w = kPopupWidth;
+    int h = kPopupHeight;
+
     if (screen) {
         QRect avail = screen->availableGeometry();
-        int margin = 24;
-        bool isRtl = Localization::Instance().IsRTL();
+        int margin = 20;
+        int x = avail.left() + (avail.width() - w) / 2;
+        int y = avail.top() + margin;
 
-        int x = isRtl ? (avail.left() + margin) : (avail.right() - width() - margin);
-        int y = avail.bottom() - height() - margin;
-        move(x, y);
+        switch (s.popupPosition) {
+            case PopupPosition::TopLeft:      x = avail.left() + margin;                    y = avail.top() + margin; break;
+            case PopupPosition::TopCenter:    x = avail.left() + (avail.width() - w) / 2;   y = avail.top() + margin; break;
+            case PopupPosition::TopRight:     x = avail.right() - w - margin;               y = avail.top() + margin; break;
+            case PopupPosition::CenterLeft:   x = avail.left() + margin;                    y = avail.top() + (avail.height() - h) / 2; break;
+            case PopupPosition::Center:       x = avail.left() + (avail.width() - w) / 2;   y = avail.top() + (avail.height() - h) / 2; break;
+            case PopupPosition::CenterRight:  x = avail.right() - w - margin;               y = avail.top() + (avail.height() - h) / 2; break;
+            case PopupPosition::BottomLeft:   x = avail.left() + margin;                    y = avail.bottom() - h - margin; break;
+            case PopupPosition::BottomCenter: x = avail.left() + (avail.width() - w) / 2;   y = avail.bottom() - h - margin; break;
+            case PopupPosition::BottomRight:  x = avail.right() - w - margin;               y = avail.bottom() - h - margin; break;
+            default:                          x = avail.left() + (avail.width() - w) / 2;   y = avail.top() + margin; break;
+        }
+
+        m_targetGeometry = QRect(x, y, w, h);
+        setGeometry(m_targetGeometry);
+    } else {
+        m_targetGeometry = QRect(100, 40, w, h);
+        setGeometry(m_targetGeometry);
     }
 }
 
 int PopupWindow::GetAnimationDurationMs() const {
     switch (Settings::Instance().Get().animationSpeed) {
-        case AnimationSpeed::Snappy: return 250;
-        case AnimationSpeed::Cinematic: return 600;
+        case AnimationSpeed::Snappy:    return 250;
+        case AnimationSpeed::Cinematic: return 550;
         case AnimationSpeed::Normal:
-        default: return 400;
+        default:                        return 380;
     }
 }
 
 void PopupWindow::StartEntranceAnimation() {
+    const auto& s = Settings::Instance().Get();
+    if (!s.animationEnabled) {
+        setGeometry(m_targetGeometry);
+        setWindowOpacity(1.0);
+        return;
+    }
+
     int duration = GetAnimationDurationMs();
-    PopupAnimation animType = Settings::Instance().Get().popupAnimation;
+    PopupAnimation animType = s.popupAnimation;
 
     m_animGroup = new QParallelAnimationGroup(this);
 
-    m_animOpacity = new QPropertyAnimation(m_opacityEffect, "opacity", this);
-    m_animOpacity->setDuration(duration);
-    m_animOpacity->setStartValue(0.0);
-    m_animOpacity->setEndValue(1.0);
-    m_animOpacity->setEasingCurve(QEasingCurve::OutCubic);
-    m_animGroup->addAnimation(m_animOpacity);
+    auto* animOpacity = new QPropertyAnimation(this, "windowOpacity", m_animGroup);
+    animOpacity->setDuration(duration);
+    animOpacity->setStartValue(0.0);
+    animOpacity->setEndValue(1.0);
+    animOpacity->setEasingCurve(QEasingCurve::OutCubic);
+    m_animGroup->addAnimation(animOpacity);
 
-    QRect targetGeo = geometry();
+    QRect targetGeo = m_targetGeometry;
     QRect startGeo = targetGeo;
+    bool isTop = (s.popupPosition == PopupPosition::TopLeft ||
+                  s.popupPosition == PopupPosition::TopCenter ||
+                  s.popupPosition == PopupPosition::TopRight);
+    int dirY = isTop ? -1 : 1;
+
+    auto* animGeo = new QPropertyAnimation(this, "geometry", m_animGroup);
+    animGeo->setDuration(duration);
+    animGeo->setEndValue(targetGeo);
 
     switch (animType) {
         case PopupAnimation::SpringBloom:
-            startGeo.adjust(15, 15, -15, -15);
-            m_animGeometry = new QPropertyAnimation(this, "geometry", this);
-            m_animGeometry->setDuration(duration + 100);
-            m_animGeometry->setStartValue(startGeo);
-            m_animGeometry->setEndValue(targetGeo);
-            m_animGeometry->setEasingCurve(QEasingCurve::OutBack);
-            m_animGroup->addAnimation(m_animGeometry);
-            break;
-
-        case PopupAnimation::LiquidFloat:
-            startGeo.translate(0, 30);
-            m_animGeometry = new QPropertyAnimation(this, "geometry", this);
-            m_animGeometry->setDuration(duration);
-            m_animGeometry->setStartValue(startGeo);
-            m_animGeometry->setEndValue(targetGeo);
-            m_animGeometry->setEasingCurve(QEasingCurve::OutCubic);
-            m_animGroup->addAnimation(m_animGeometry);
+            startGeo.adjust(24, 18, -24, -18);
+            startGeo.translate(0, dirY * 16);
+            animGeo->setDuration(duration + 80);
+            animGeo->setEasingCurve(QEasingCurve::OutBack);
             break;
 
         case PopupAnimation::HorizontalDrift: {
-            bool isRtl = Localization::Instance().IsRTL();
-            startGeo.translate(isRtl ? -60 : 60, 0);
-            m_animGeometry = new QPropertyAnimation(this, "geometry", this);
-            m_animGeometry->setDuration(duration);
-            m_animGeometry->setStartValue(startGeo);
-            m_animGeometry->setEndValue(targetGeo);
-            m_animGeometry->setEasingCurve(QEasingCurve::OutQuad);
-            m_animGroup->addAnimation(m_animGeometry);
+            bool isLeft = (s.popupPosition == PopupPosition::TopLeft ||
+                           s.popupPosition == PopupPosition::CenterLeft ||
+                           s.popupPosition == PopupPosition::BottomLeft);
+            startGeo.translate(isLeft ? -65 : 65, 0);
+            animGeo->setEasingCurve(QEasingCurve::OutQuint);
             break;
         }
 
-        case PopupAnimation::RippleGenesis:
+        case PopupAnimation::LiquidFloat:
+            startGeo.translate(0, dirY * 32);
+            animGeo->setEasingCurve(QEasingCurve::OutElastic);
+            animGeo->setDuration(duration + 120);
+            break;
+
         case PopupAnimation::OrigamiUnfurl:
+            startGeo.adjust(10, 45, -10, -45);
+            animGeo->setEasingCurve(QEasingCurve::OutQuart);
+            break;
+
         case PopupAnimation::EtherealSweep:
+            startGeo.adjust(12, 8, -12, -8);
+            startGeo.translate(0, dirY * 18);
+            animGeo->setEasingCurve(QEasingCurve::OutCubic);
+            break;
+
         case PopupAnimation::ZenBreathing:
+            startGeo.adjust(20, 14, -20, -14);
+            animGeo->setDuration(duration + 100);
+            animGeo->setEasingCurve(QEasingCurve::InOutSine);
+            break;
+
+        case PopupAnimation::RippleGenesis:
+            startGeo.adjust(36, 26, -36, -26);
+            animGeo->setDuration(duration + 90);
+            animGeo->setEasingCurve(QEasingCurve::OutBack);
+            break;
+
         case PopupAnimation::Classic:
         default:
-            startGeo.adjust(8, 8, -8, -8);
-            m_animGeometry = new QPropertyAnimation(this, "geometry", this);
-            m_animGeometry->setDuration(duration);
-            m_animGeometry->setStartValue(startGeo);
-            m_animGeometry->setEndValue(targetGeo);
-            m_animGeometry->setEasingCurve(QEasingCurve::OutQuad);
-            m_animGroup->addAnimation(m_animGeometry);
+            startGeo.translate(0, dirY * 24);
+            animGeo->setEasingCurve(QEasingCurve::OutCubic);
             break;
     }
 
+    setGeometry(startGeo);
+    setWindowOpacity(0.0);
+    animGeo->setStartValue(startGeo);
+    m_animGroup->addAnimation(animGeo);
     m_animGroup->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
@@ -271,19 +333,27 @@ void PopupWindow::Dismiss() {
 }
 
 void PopupWindow::StartExitAnimation() {
-    int duration = GetAnimationDurationMs() / 2;
-    auto* exitAnim = new QPropertyAnimation(m_opacityEffect, "opacity", this);
-    exitAnim->setDuration(duration);
-    exitAnim->setStartValue(m_opacityEffect->opacity());
-    exitAnim->setEndValue(0.0);
-    exitAnim->setEasingCurve(QEasingCurve::InQuad);
+    StopActiveAnimations();
 
-    connect(exitAnim, &QPropertyAnimation::finished, this, [this]() {
+    if (!Settings::Instance().Get().animationEnabled) {
         hide();
-        m_opacityEffect->setOpacity(1.0);
+        setWindowOpacity(1.0);
+        return;
+    }
+
+    int duration = std::max(120, GetAnimationDurationMs() / 2);
+    m_exitAnim = new QPropertyAnimation(this, "windowOpacity", this);
+    m_exitAnim->setDuration(duration);
+    m_exitAnim->setStartValue(windowOpacity());
+    m_exitAnim->setEndValue(0.0);
+    m_exitAnim->setEasingCurve(QEasingCurve::InQuad);
+
+    connect(m_exitAnim, &QPropertyAnimation::finished, this, [this]() {
+        hide();
+        setWindowOpacity(1.0);
     });
 
-    exitAnim->start(QAbstractAnimation::DeleteWhenStopped);
+    m_exitAnim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void PopupWindow::OnTimerTick() {
@@ -295,16 +365,6 @@ void PopupWindow::OnTimerTick() {
         Dismiss();
     } else {
         m_progress->setValue(remaining);
-    }
-}
-
-void PopupWindow::OnCounterClicked() {
-    m_currentRepetitions++;
-    if (m_currentRepetitions >= m_targetRepetitions) {
-        m_btnCounter->setText(QString::fromUtf8("✓ تم الإكمال!"));
-        m_btnCounter->setStyleSheet("background-color: #B7F34A; color: #080A09; font-weight: bold;");
-    } else {
-        m_btnCounter->setText(QString("%1 / %2").arg(m_currentRepetitions).arg(m_targetRepetitions));
     }
 }
 
@@ -323,7 +383,7 @@ void PopupWindow::OnPauseClicked() {
 
 void PopupWindow::enterEvent(QEnterEvent* event) {
     QWidget::enterEvent(event);
-    m_isPausedByHover = true; // Pause auto-dismiss timer while user is hovering
+    m_isPausedByHover = true;
 }
 
 void PopupWindow::leaveEvent(QEvent* event) {

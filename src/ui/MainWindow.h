@@ -31,6 +31,7 @@ public:
     virtual void OnActivated() {}
     virtual float GetScrollY() const { return 0.f; }
     virtual void SetScrollY(float y) {}
+    virtual bool OnScrollTick() { return false; }
 };
 // ── MainWindow ────────────────────────────────────────────────────────────────
 // Primary application window: sidebar + content area.

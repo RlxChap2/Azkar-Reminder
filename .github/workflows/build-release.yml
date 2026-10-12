@@ -88,10 +88,17 @@ jobs:
         mkdir -p AppDir/usr/bin
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         mkdir -p AppDir/usr/share/azkar-reminder/audio
+        mkdir -p AppDir/usr/share/azkar-reminder/fonts
         
         cp build/azkar_reminder AppDir/usr/bin/
+        if [ -f assets/content.md ]; then
+          cp assets/content.md AppDir/usr/share/azkar-reminder/
+        fi
         if [ -f assets/audio/diode_matrix.mp3 ]; then
           cp assets/audio/diode_matrix.mp3 AppDir/usr/share/azkar-reminder/audio/
+        fi
+        if [ -f assets/fonts/Cairo-Regular.ttf ]; then
+          cp assets/fonts/Cairo-Regular.ttf AppDir/usr/share/azkar-reminder/fonts/
         fi
         
         if [ -f assets/images/logo.png ]; then
@@ -169,6 +176,18 @@ jobs:
           APP_PATH="build/Azkar Reminder.app"
         fi
         
+        mkdir -p "${APP_PATH}/Contents/Resources/audio"
+        mkdir -p "${APP_PATH}/Contents/Resources/fonts"
+        if [ -f assets/content.md ]; then
+          cp assets/content.md "${APP_PATH}/Contents/Resources/"
+        fi
+        if [ -f assets/audio/diode_matrix.mp3 ]; then
+          cp assets/audio/diode_matrix.mp3 "${APP_PATH}/Contents/Resources/audio/"
+        fi
+        if [ -f assets/fonts/Cairo-Regular.ttf ]; then
+          cp assets/fonts/Cairo-Regular.ttf "${APP_PATH}/Contents/Resources/fonts/"
+        fi
+
         # Deploy Qt dependencies into bundle
         macdeployqt "${APP_PATH}" -dmg || true
         

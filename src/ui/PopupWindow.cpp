@@ -245,14 +245,14 @@ bool PopupWindow::InitD2D() {
 
     m_dwriteFactory->CreateTextFormat(
         fontName, nullptr,
-        DWRITE_FONT_WEIGHT_REGULAR, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL,
-        ds::FontSize::Small * m_dpiScale,
+        8.5f * m_dpiScale,
         L"en-US", &m_textFmtSmall);
 
     if (m_textFmtSmall) {
         m_textFmtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        m_textFmtSmall->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+        m_textFmtSmall->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
 
     // Initialize WIC and load cropped circular logos for all themes + dormant
@@ -300,12 +300,16 @@ void PopupWindow::ReleaseD2D() {
 }
 
 // ── Show / Hide ───────────────────────────────────────────────────────────────
-void PopupWindow::Show(const ContentItem* item) {
+void PopupWindow::Show(const ContentItem* item, bool force) {
     if (!m_hwnd || !item) return;
-    if (m_state != PopupAnimState::Hidden && m_state != PopupAnimState::Closing) {
+    if (!force && m_state != PopupAnimState::Hidden && m_state != PopupAnimState::Closing) {
         // Already visible — do not abruptly replace text while user is reading!
         return;
     }
+
+    KillTimer(m_hwnd, TIMER_POPUP_ANIM_EXIT);
+    KillTimer(m_hwnd, TIMER_POPUP_AUTODISMISS);
+    KillTimer(m_hwnd, TIMER_POPUP_ANIM_ENTER);
 
     m_itemCopy = *item;
     m_item = &m_itemCopy;
@@ -567,6 +571,8 @@ RECT PopupWindow::CalculatePosition(int w, int h) {
 
 // ── Animation helpers ─────────────────────────────────────────────────────────
 void PopupWindow::StartEnterAnim() {
+    KillTimer(m_hwnd, TIMER_POPUP_ANIM_EXIT);
+    KillTimer(m_hwnd, TIMER_POPUP_AUTODISMISS);
     m_state = PopupAnimState::Entering;
     m_animT = 0.f;
     m_animStart = GetTickCount();
@@ -1174,6 +1180,7 @@ void PopupWindow::DrawContent(ID2D1RenderTarget* rt, float alpha) {
     float totalTextH = mainH + subH;
     float availH = (float)m_height;
     float yCursor = std::max(padY, (availH - totalTextH) / 2.f);
+    m_counterRect = { 0, 0, 0, 0 };
 
     if (mainLayout) {
         rt->DrawTextLayout(D2D1::Point2F(leftPad, yCursor), mainLayout, textBrush);
@@ -1189,69 +1196,13 @@ void PopupWindow::DrawContent(ID2D1RenderTarget* rt, float alpha) {
         subLayout->Release();
     }
 
-    // Repetitions Badge (if counter pill is disabled)
-    if (!s.showCounterPill && m_item->repetitions > 1 && m_textFmtSmall) {
-        std::wstring repStr = std::to_wstring(m_item->repetitions) + L"×";
-        float repW = 34.f * m_dpiScale;
-        float repH = 16.f * m_dpiScale;
-        float rx = leftPad;
-        float ry = 9.f * m_dpiScale;
-        D2D1_ROUNDED_RECT repRect = D2D1::RoundedRect(D2D1::RectF(rx, ry, rx + repW, ry + repH), 3.f * m_dpiScale, 3.f * m_dpiScale);
-        ID2D1SolidColorBrush* repBrush = nullptr;
-        rt->CreateSolidColorBrush(ds::Rgba(0x1B, 0x38, 0x0E, alpha * 0.9f), &repBrush);
-        if (repBrush) {
-            rt->FillRoundedRectangle(repRect, repBrush);
-            repBrush->SetColor(ds::Accent::Primary(alpha * 0.7f));
-            rt->DrawRoundedRectangle(repRect, repBrush, 0.75f);
-            repBrush->SetColor(ds::Accent::Primary(alpha));
-            DWRITE_TEXT_ALIGNMENT ta = m_textFmtSmall->GetTextAlignment();
-            m_textFmtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            rt->DrawTextW(repStr.c_str(), (UINT32)repStr.size(), m_textFmtSmall, repRect.rect, repBrush);
-            m_textFmtSmall->SetTextAlignment(ta);
-            repBrush->Release();
-        }
-    }
-
     textBrush->Release();
 }
 
 void PopupWindow::DrawCounterPill(ID2D1RenderTarget* rt, float alpha) {
-    const auto& s = Settings::Instance().Get();
-    if (!s.showCounterPill || m_targetCounter <= 0) {
-        m_counterRect = { 0, 0, 0, 0 };
-        return;
-    }
-
-    float pillW = 64.f * m_dpiScale;
-    float pillH = 20.f * m_dpiScale;
-    float rx = 64.f * m_dpiScale;
-    float ry = 7.f * m_dpiScale;
-
-    m_counterRect = { (int)rx, (int)ry, (int)(rx + pillW), (int)(ry + pillH) };
-
-    D2D1_ROUNDED_RECT pillR = D2D1::RoundedRect(
-        D2D1::RectF(rx, ry, rx + pillW, ry + pillH),
-        pillH * 0.5f, pillH * 0.5f);
-
-    ID2D1SolidColorBrush* pillBrush = nullptr;
-    rt->CreateSolidColorBrush(ds::Rgba(0x00, 0x00, 0x00, alpha * 0.45f), &pillBrush);
-    if (!pillBrush) return;
-
-    rt->FillRoundedRectangle(pillR, pillBrush);
-
-    pillBrush->SetColor(ds::Accent::Primary(alpha * 0.85f));
-    rt->DrawRoundedRectangle(pillR, pillBrush, 1.0f);
-
-    std::wstring counterStr = std::to_wstring(m_currentCounter) + L" / " + std::to_wstring(m_targetCounter);
-    if (m_textFmtSmall) {
-        pillBrush->SetColor(ds::TextPrimary());
-        DWRITE_TEXT_ALIGNMENT ta = m_textFmtSmall->GetTextAlignment();
-        m_textFmtSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        rt->DrawTextW(counterStr.c_str(), (UINT32)counterStr.size(), m_textFmtSmall, pillR.rect, pillBrush);
-        m_textFmtSmall->SetTextAlignment(ta);
-    }
-
-    pillBrush->Release();
+    (void)rt;
+    (void)alpha;
+    m_counterRect = { 0, 0, 0, 0 };
 }
 
 void PopupWindow::DrawCloseButton(ID2D1RenderTarget* rt, float alpha) {

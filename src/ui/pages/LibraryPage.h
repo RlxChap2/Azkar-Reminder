@@ -14,7 +14,8 @@ public:
     bool OnKeyDown(WPARAM key) override;
     bool HitTestInteractive(int x, int y) override;
     float GetScrollY() const override { return m_scrollY; }
-    void SetScrollY(float y) override { m_scrollY = y; }
+    void SetScrollY(float y) override { m_scrollY = y; m_targetScrollY = y; }
+    bool OnScrollTick() override;
 private:
     void DrawContentItem(ID2D1RenderTarget* rt, float x, float& y, float w, size_t index, bool hovered);
     void DrawEmptyState(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds);
@@ -35,6 +36,8 @@ private:
     int   m_hoveredBtn  = -1;
     bool  m_hoveredDelBtn = false;
     float m_scrollY = 0.f;
+    float m_targetScrollY = 0.f;
+    float m_maxScroll = 0.f;
     float m_contentX = 0.f;
     float m_contentY = 0.f;
     float m_contentW = 0.f;

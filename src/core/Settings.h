@@ -129,7 +129,7 @@ struct AppSettings {
     // Typography & Content
     PopupFontSize popupFontSize       = PopupFontSize::Medium;
     bool          showTashkeel        = true;
-    bool          showCounterPill     = true;
+    bool          showCounterPill     = false;
     bool          showSource          = true;
 
     // Sound

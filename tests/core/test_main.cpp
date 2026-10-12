@@ -130,7 +130,7 @@ bool TestContentEngine() {
     return true;
 }
 
-// ── Test 5: Scheduler State & Pause/Resume ────────────────────────────────────
+// ── Test 5: Scheduler State & Pause/Resume & TriggerNow ───────────────────────
 bool TestScheduler() {
     auto& sched = dhikr::Scheduler::Instance();
 
@@ -138,18 +138,28 @@ bool TestScheduler() {
     dhikr::Settings::Instance().Get().remindersEnabled = true;
     dhikr::Settings::Instance().Get().paused = false;
 
+    bool triggered = false;
+    sched.Start([&]() {
+        triggered = true;
+    });
+
     sched.Resume();
-    if (sched.IsPaused()) return false;
+    if (sched.IsPaused()) { sched.Stop(); return false; }
 
     // Pause for 15 minutes
     sched.Pause(15);
-    if (!sched.IsPaused()) return false;
-    if (sched.GetState() != dhikr::ScheduleState::Paused) return false;
+    if (!sched.IsPaused()) { sched.Stop(); return false; }
+    if (sched.GetState() != dhikr::ScheduleState::Paused) { sched.Stop(); return false; }
 
     // Resume
     sched.Resume();
-    if (sched.IsPaused()) return false;
+    if (sched.IsPaused()) { sched.Stop(); return false; }
 
+    // TriggerNow must invoke the callback
+    sched.TriggerNow();
+    if (!triggered) { sched.Stop(); return false; }
+
+    sched.Stop();
     return true;
 }
 
@@ -221,6 +231,22 @@ bool TestContentEngineCustomItems() {
     return true;
 }
 
+// ── Test 9: Embedded Default Content Resource (macOS/Linux/Windows Fallback) ──
+bool TestEmbeddedContentResource() {
+    auto& ce = dhikr::ContentEngine::Instance();
+    ce.ClearAll();
+    if (!ce.IsEmpty()) return false;
+
+    auto res = ce.LoadFromResource();
+    if (res != dhikr::ContentLoadResult::Success) return false;
+    if (ce.Count() < 100) return false;
+
+    const auto* item = ce.GetNext();
+    if (!item || item->text.empty()) return false;
+
+    return true;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "   Azkar Core Unit Tests (C++20)        " << std::endl;
@@ -234,6 +260,7 @@ int main() {
     RunTest("Localization RTL & Dictionaries",    TestLocalization);
     RunTest("Platform Adapters (AutoStart & FullScreen)", TestPlatformAdapters);
     RunTest("ContentEngine Custom Items & Safety", TestContentEngineCustomItems);
+    RunTest("Embedded Content Resource Fallback",  TestEmbeddedContentResource);
 
     std::cout << "========================================" << std::endl;
     std::cout << "Tests Passed: " << g_passedTests << " / " << (g_passedTests + g_failedTests) << std::endl;
