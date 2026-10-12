@@ -184,6 +184,43 @@ bool TestPlatformAdapters() {
     return true;
 }
 
+// ── Test 8: ContentEngine Custom Item Operations & Pointer Safety ─────────────
+bool TestContentEngineCustomItems() {
+    auto& ce = dhikr::ContentEngine::Instance();
+    size_t initialCount = ce.Count();
+
+    dhikr::ContentItem item1;
+    item1.id = "custom_test_1";
+    item1.text = L"ذكر مخصص للتجربة ١";
+    item1.category = "custom";
+    item1.repetitions = 3;
+    item1.enabled = true;
+    ce.AddItem(item1);
+
+    if (ce.Count() != initialCount + 1) return false;
+
+    // Check preview and current
+    const auto* prev = ce.GetNextPreview();
+    if (!prev) return false;
+
+    // Toggle enabled
+    if (!ce.ToggleItemEnabled(0)) return false;
+
+    // Delete by ID
+    if (!ce.DeleteItemById("custom_test_1")) return false;
+    if (ce.Count() != initialCount) return false;
+
+    // Safe delete of non-existent ID should return false, not crash
+    if (ce.DeleteItemById("non_existent_id")) return false;
+
+    // Add and delete by index
+    ce.AddItem(item1);
+    if (!ce.DeleteItem(0)) return false;
+    if (ce.DeleteItem(99999)) return false; // out of bounds check
+
+    return true;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "   Azkar Core Unit Tests (C++20)        " << std::endl;
@@ -196,6 +233,7 @@ int main() {
     RunTest("Scheduler Pause & State Tracking",   TestScheduler);
     RunTest("Localization RTL & Dictionaries",    TestLocalization);
     RunTest("Platform Adapters (AutoStart & FullScreen)", TestPlatformAdapters);
+    RunTest("ContentEngine Custom Items & Safety", TestContentEngineCustomItems);
 
     std::cout << "========================================" << std::endl;
     std::cout << "Tests Passed: " << g_passedTests << " / " << (g_passedTests + g_failedTests) << std::endl;

@@ -336,6 +336,52 @@ void ContentEngine::AddItem(const ContentItem& item) {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_items.insert(m_items.begin(), item);
+        m_current = nullptr;
+    }
+    Save();
+}
+
+bool ContentEngine::DeleteItem(size_t index) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (index >= m_items.size()) return false;
+        m_items.erase(m_items.begin() + index);
+        m_current = nullptr;
+    }
+    Save();
+    return true;
+}
+
+bool ContentEngine::DeleteItemById(const std::string& id) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = std::find_if(m_items.begin(), m_items.end(), [&](const ContentItem& item) {
+            return item.id == id;
+        });
+        if (it == m_items.end()) return false;
+        m_items.erase(it);
+        m_current = nullptr;
+    }
+    Save();
+    return true;
+}
+
+bool ContentEngine::ToggleItemEnabled(size_t index) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (index >= m_items.size()) return false;
+        m_items[index].enabled = !m_items[index].enabled;
+    }
+    Save();
+    return true;
+}
+
+void ContentEngine::ClearAll() {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_items.clear();
+        m_current = nullptr;
+        m_recentIds.clear();
     }
     Save();
 }
@@ -343,7 +389,10 @@ void ContentEngine::AddItem(const ContentItem& item) {
 const ContentItem* ContentEngine::GetNextPreview() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_items.empty()) return nullptr;
-    if (m_current && m_current->enabled) return m_current;
+    // Check if m_current is valid (points inside m_items memory block)
+    if (m_current >= m_items.data() && m_current < (m_items.data() + m_items.size())) {
+        if (m_current->enabled) return m_current;
+    }
     for (const auto& it : m_items) {
         if (it.enabled) return &it;
     }
@@ -591,7 +640,11 @@ const ContentItem* ContentEngine::GetNext() {
 
 const ContentItem* ContentEngine::GetCurrent() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_current;
+    if (m_items.empty()) return nullptr;
+    if (m_current >= m_items.data() && m_current < (m_items.data() + m_items.size())) {
+        return m_current;
+    }
+    return nullptr;
 }
 
 std::vector<std::string> ContentEngine::GetCategories() const {

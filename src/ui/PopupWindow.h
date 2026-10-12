@@ -120,6 +120,7 @@ private:
 
     // Content
     const ContentItem* m_item       = nullptr;
+    ContentItem       m_itemCopy;
 
     // Dimensions (DPI-scaled)
     int               m_width       = 420;

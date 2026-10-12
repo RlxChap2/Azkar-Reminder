@@ -418,7 +418,8 @@ void LibraryPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
     auto& allItems = ContentEngine::Instance().GetAllItems();
     std::vector<size_t> filteredIndices = GetFilteredIndices(m_currentFilter);
 
-    if (allItems.empty()) {
+    if (allItems.empty() || filteredIndices.empty()) {
+        m_scrollY = 0.f;
         DrawEmptyState(rt, D2D1::RectF(x, y, x+w, bounds.bottom - bounds.top));
         if (m_showAddModal) DrawAddModal(rt, bounds);
         return;
@@ -498,7 +499,7 @@ bool LibraryPage::OnKeyDown(WPARAM key) {
     } else if (key == VK_RETURN) {
         if (!m_inputDhikrText.empty()) {
             ContentItem newItem;
-            newItem.id = "custom_" + std::to_string(time(nullptr));
+            newItem.id = "custom_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand());
             newItem.text = m_inputDhikrText;
             newItem.category = "custom";
             newItem.priority = 1;
@@ -545,7 +546,7 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
         if (x >= saveR.left && x <= saveR.right && y >= saveR.top && y <= saveR.bottom) {
             if (!m_inputDhikrText.empty()) {
                 ContentItem newItem;
-                newItem.id = "custom_" + std::to_string(time(nullptr));
+                newItem.id = "custom_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand());
                 newItem.text = m_inputDhikrText;
                 newItem.category = "custom";
                 newItem.priority = 1;
@@ -623,10 +624,13 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
     if (x >= delRect.left && x <= delRect.right && y >= delRect.top && y <= delRect.bottom) {
         std::wstring title = Localization::Instance().Get(L"library.delete_title");
         std::wstring msg   = Localization::Instance().Get(L"library.delete_confirm");
+        m_hoveredItem = -1;
+        m_hoveredDelBtn = false;
+        m_hoveredBtn = -1;
         int r = MessageBoxW(Application::Instance().MainWindow(), msg.c_str(), title.c_str(), MB_YESNO | MB_ICONWARNING);
         if (r == IDYES) {
-            ContentEngine::Instance().GetItemsMutable().clear();
-            ContentEngine::Instance().Save();
+            ContentEngine::Instance().ClearAll();
+            m_scrollY = 0.f;
             MainWindow::Instance().OnSettingsChanged();
             MainWindow::Instance().Invalidate();
         }
@@ -664,21 +668,29 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
     }
 
     if (m_hoveredItem >= 0) {
-        auto& items = ContentEngine::Instance().GetItemsMutable();
-        if (m_hoveredItem < (int)items.size()) {
-            if (m_hoveredDelBtn) {
+        int targetIndex = m_hoveredItem;
+        bool isDelBtn   = m_hoveredDelBtn;
+
+        // Reset hover states before opening any modal dialog to prevent re-entrancy issues
+        m_hoveredItem   = -1;
+        m_hoveredDelBtn = false;
+
+        const auto& allItems = ContentEngine::Instance().GetAllItems();
+        if (targetIndex >= 0 && targetIndex < (int)allItems.size()) {
+            if (isDelBtn) {
+                std::string targetId = allItems[targetIndex].id;
                 std::wstring title = Localization::Instance().Get(L"library.delete_title");
                 std::wstring msg   = Localization::Instance().Get(L"library.delete_item_confirm");
                 int r = MessageBoxW(Application::Instance().MainWindow(), msg.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION);
                 if (r == IDYES) {
-                    items.erase(items.begin() + m_hoveredItem);
-                    ContentEngine::Instance().Save();
-                    m_hoveredItem = -1;
-                    m_hoveredDelBtn = false;
+                    if (!targetId.empty()) {
+                        ContentEngine::Instance().DeleteItemById(targetId);
+                    } else {
+                        ContentEngine::Instance().DeleteItem((size_t)targetIndex);
+                    }
                 }
             } else {
-                items[m_hoveredItem].enabled = !items[m_hoveredItem].enabled;
-                ContentEngine::Instance().Save();
+                ContentEngine::Instance().ToggleItemEnabled((size_t)targetIndex);
             }
             MainWindow::Instance().OnSettingsChanged();
             MainWindow::Instance().Invalidate();
@@ -748,22 +760,26 @@ bool LibraryPage::OnMouseMove(int x, int y) {
 
     if (x >= m_contentX && x <= m_contentX + m_contentW && y >= listTop) {
         float relY = (y - listTop) + m_scrollY;
-        int idx = (int)(relY / itemH);
-        float cardRelY = relY - idx * itemH;
-        
-        std::vector<size_t> filtered = GetFilteredIndices(m_currentFilter);
-        if (idx >= 0 && idx < (int)filtered.size() && cardRelY <= cardH) {
-            m_hoveredItem = (int)filtered[idx];
+        if (relY >= 0.f) {
+            int idx = (int)(relY / itemH);
+            float cardRelY = relY - idx * itemH;
+            
+            std::vector<size_t> filtered = GetFilteredIndices(m_currentFilter);
+            if (idx >= 0 && idx < (int)filtered.size() && cardRelY <= cardH) {
+                m_hoveredItem = (int)filtered[idx];
 
-            float delSize = 28.f * m_dpiScale;
-            float delLeft = m_contentX + (isRtl ? (32.f * m_dpiScale) : (16.f * m_dpiScale));
-            float delTop = (listTop - m_scrollY + idx * itemH) + (cardH - delSize) / 2.f;
-            float delRight = delLeft + delSize;
-            float delBottom = delTop + delSize;
+                float delSize = 28.f * m_dpiScale;
+                float delLeft = m_contentX + (isRtl ? (32.f * m_dpiScale) : (16.f * m_dpiScale));
+                float delTop = (listTop - m_scrollY + idx * itemH) + (cardH - delSize) / 2.f;
+                float delRight = delLeft + delSize;
+                float delBottom = delTop + delSize;
 
-            if (x >= delLeft - 4.f*m_dpiScale && x <= delRight + 4.f*m_dpiScale &&
-                y >= delTop - 4.f*m_dpiScale && y <= delBottom + 4.f*m_dpiScale) {
-                m_hoveredDelBtn = true;
+                if (x >= delLeft - 4.f*m_dpiScale && x <= delRight + 4.f*m_dpiScale &&
+                    y >= delTop - 4.f*m_dpiScale && y <= delBottom + 4.f*m_dpiScale) {
+                    m_hoveredDelBtn = true;
+                }
+            } else {
+                m_hoveredItem = -1;
             }
         } else {
             m_hoveredItem = -1;

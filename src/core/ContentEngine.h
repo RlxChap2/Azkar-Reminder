@@ -77,6 +77,16 @@ public:
     // Add a new custom item and persist to disk
     void AddItem(const ContentItem& item);
 
+    // Delete item safely by index or by ID
+    bool DeleteItem(size_t index);
+    bool DeleteItemById(const std::string& id);
+
+    // Toggle enabled state safely
+    bool ToggleItemEnabled(size_t index);
+
+    // Clear all items safely
+    void ClearAll();
+
     // Peek at next scheduled item for display/preview
     const ContentItem* GetNextPreview() const;
 

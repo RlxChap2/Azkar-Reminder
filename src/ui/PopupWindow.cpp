@@ -307,7 +307,8 @@ void PopupWindow::Show(const ContentItem* item) {
         return;
     }
 
-    m_item = item;
+    m_itemCopy = *item;
+    m_item = &m_itemCopy;
     m_copyFeedback = false;
     m_currentCounter = 1;
     m_targetCounter = (m_item && m_item->repetitions > 1) ? m_item->repetitions : 33;

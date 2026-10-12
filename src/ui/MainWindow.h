@@ -136,7 +136,7 @@ private:
     std::unique_ptr<PageBase> m_pages[5]; // one per nav item
 
     // Full-screen distraction queue
-    const ContentItem*      m_pendingFullscreenReminder = nullptr;
+    std::unique_ptr<ContentItem> m_pendingFullscreenReminder;
 
     // D2D resources
     ID2D1Factory*           m_d2dFactory    = nullptr;

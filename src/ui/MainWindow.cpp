@@ -742,7 +742,7 @@ LRESULT MainWindow::OnReminder(bool forcePreview) {
             } else {
                 // Queue until fullscreen ends (Default)
                 LOG_INFO("[FULLSCREEN] Fullscreen active (" + fgInfo + ") — queuing reminder until fullscreen ends");
-                m_pendingFullscreenReminder = item;
+                m_pendingFullscreenReminder = std::make_unique<ContentItem>(*item);
                 SetTimer(m_hwnd, TIMER_FULLSCREEN_RESUME, 2000, nullptr);
                 return 0;
             }
@@ -914,10 +914,10 @@ LRESULT MainWindow::OnTimer(UINT_PTR timerId) {
         if (m_pendingFullscreenReminder) {
             if (!FullScreenDetector::Instance().IsFullScreenActive()) {
                 KillTimer(m_hwnd, TIMER_FULLSCREEN_RESUME);
-                const ContentItem* itemToShow = m_pendingFullscreenReminder;
-                m_pendingFullscreenReminder = nullptr;
+                ContentItem itemToShow = *m_pendingFullscreenReminder;
+                m_pendingFullscreenReminder.reset();
                 LOG_INFO("[FULLSCREEN] Fullscreen mode ended — displaying queued reminder");
-                PopupWindow::Instance().Show(itemToShow);
+                PopupWindow::Instance().Show(&itemToShow);
             }
         } else {
             KillTimer(m_hwnd, TIMER_FULLSCREEN_RESUME);
