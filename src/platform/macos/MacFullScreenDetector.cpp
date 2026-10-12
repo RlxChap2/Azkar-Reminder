@@ -11,7 +11,7 @@ std::unique_ptr<IFullScreenDetector> IFullScreenDetector::Create() {
 }
 
 FullScreenState MacFullScreenDetector::CheckFullScreen() {
-    CFArrayRef windowList = CGWindowListCopyWindowInformation(
+    CFArrayRef windowList = CGWindowListCopyWindowInfo(
         kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
         kCGNullWindowID
     );

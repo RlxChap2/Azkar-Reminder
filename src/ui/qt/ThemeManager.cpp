@@ -1,5 +1,6 @@
 #include "ThemeManager.h"
 #include <QFontDatabase>
+#include <QFontInfo>
 #include <QApplication>
 #include <ctime>
 

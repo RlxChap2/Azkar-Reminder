@@ -31,13 +31,13 @@ int main(int argc, char* argv[]) {
 
     // 1. Initialize Directories & Logging
     dhikr::PlatformPaths::EnsureDirectoriesExist();
-    dhikr::Logger::Instance().Init(dhikr::PlatformPaths::GetLogsDir() / "azkar.log");
+    dhikr::Logger::Instance().Initialize(dhikr::PlatformPaths::GetLogsDir());
     LOG_INFO("Starting Azkar Reminder v1.2.0 (Qt 6 Cross-Platform)");
 
     // 2. Load Settings & Localization
     dhikr::Settings::Instance().Load(dhikr::PlatformPaths::GetConfigDir());
     dhikr::Localization::Instance().SetLanguage(
-        dhikr::Settings::Instance().Get().language == "en" ? L"en" : L"ar"
+        dhikr::Settings::Instance().Get().language == L"en" ? L"en" : L"ar"
     );
 
     if (dhikr::Localization::Instance().IsRTL()) {

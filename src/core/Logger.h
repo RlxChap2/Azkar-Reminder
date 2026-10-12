@@ -16,6 +16,7 @@ public:
     static Logger& Instance();
 
     void Initialize(const std::filesystem::path& logDirectory);
+    void Init(const std::filesystem::path& path) { Initialize(path.has_extension() ? path.parent_path() : path); }
     void Log(LogLevel level, const std::string& message);
     void Info(const std::string& msg)    { Log(LogLevel::Info,    msg); }
     void Warn(const std::string& msg)    { Log(LogLevel::Warning, msg); }
