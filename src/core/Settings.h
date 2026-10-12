@@ -25,6 +25,7 @@ enum class PopupAnimation {
     HorizontalDrift = 2, // انزلاق أفقي هادئ (Horizontal Drift)
     LiquidFloat = 3,     // طفو مائي انسيابي (Liquid Float)
     OrigamiUnfurl = 4,   // انبساط هادئ كالطيات (Origami Unfurl)
+    Origami = 4,
     EtherealSweep = 5,   // همس النور / التدفق الأثيري (Ethereal Aura Sweep)
     ZenBreathing = 6,    // نبض السكينة / التنفس الهادئ (Zen Breathing Ease)
     RippleGenesis = 7    // تموّج الواحة (Ripple Genesis)
@@ -34,7 +35,9 @@ enum class PopupAnimation {
 enum class AnimationSpeed {
     Cinematic = 0, // هادئ ومتمهل (Cinematic Pace - 1.35x)
     Normal = 1,    // قياسي متزن (Standard Pace - 1.0x)
-    Snappy = 2     // سريع وخاطف (Snappy Pace - 0.65x)
+    Snappy = 2,    // سريع وخاطف (Snappy Pace - 0.65x)
+    Smooth = 0,
+    Balanced = 1
 };
 
 // ── Popup Font Size Scale ────────────────────────────────────────────────────

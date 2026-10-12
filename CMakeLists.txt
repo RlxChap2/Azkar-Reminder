@@ -78,6 +78,15 @@ target_link_libraries(azkar_core PUBLIC
 )
 if(WIN32)
     target_link_libraries(azkar_core PUBLIC shell32 user32)
+elseif(APPLE)
+    target_link_libraries(azkar_core PUBLIC
+        "-framework CoreGraphics"
+        "-framework CoreFoundation"
+        "-framework AudioToolbox"
+        "-framework CoreAudio"
+    )
+elseif(UNIX)
+    target_link_libraries(azkar_core PUBLIC ${CMAKE_DL_LIBS} pthread)
 endif()
 
 # ─── Unit Tests: azkar_core_tests ─────────────────────────────────────────

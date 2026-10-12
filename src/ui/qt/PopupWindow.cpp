@@ -191,8 +191,8 @@ void PopupWindow::PositionWindow() {
 int PopupWindow::GetAnimationDurationMs() const {
     switch (Settings::Instance().Get().animationSpeed) {
         case AnimationSpeed::Snappy: return 250;
-        case AnimationSpeed::Smooth: return 600;
-        case AnimationSpeed::Balanced:
+        case AnimationSpeed::Cinematic: return 600;
+        case AnimationSpeed::Normal:
         default: return 400;
     }
 }
@@ -247,7 +247,7 @@ void PopupWindow::StartEntranceAnimation() {
         }
 
         case PopupAnimation::RippleGenesis:
-        case PopupAnimation::Origami:
+        case PopupAnimation::OrigamiUnfurl:
         case PopupAnimation::EtherealSweep:
         case PopupAnimation::ZenBreathing:
         case PopupAnimation::Classic:
