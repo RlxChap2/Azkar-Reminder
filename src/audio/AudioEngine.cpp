@@ -107,16 +107,66 @@ void AudioEngine::GenerateDefaultWav() {
 
     IMFSourceReader* pReader = nullptr;
     
-    // 1. Try custom user sound path if configured and exists
+    auto preset = Settings::Instance().Get().soundPreset;
+
+    // Procedural synthesis for built-in acoustic presets (Zero disk dependency)
+    if (preset == SoundPreset::WaterDrop || preset == SoundPreset::AmbientEcho || preset == SoundPreset::WoodTap) {
+        int sampleRate = 44100;
+        m_wfx.wFormatTag = WAVE_FORMAT_PCM;
+        m_wfx.nChannels = 1;
+        m_wfx.nSamplesPerSec = sampleRate;
+        m_wfx.wBitsPerSample = 16;
+        m_wfx.nBlockAlign = 2;
+        m_wfx.nAvgBytesPerSec = sampleRate * 2;
+        m_wfx.cbSize = 0;
+
+        float durationSec = (preset == SoundPreset::AmbientEcho) ? 1.35f : ((preset == SoundPreset::WaterDrop) ? 0.28f : 0.12f);
+        int totalSamples = (int)(sampleRate * durationSec);
+        m_audioData.resize(totalSamples * sizeof(short));
+        short* pSamples = reinterpret_cast<short*>(m_audioData.data());
+
+        double phase1 = 0.0, phase2 = 0.0, phase3 = 0.0;
+        for (int i = 0; i < totalSamples; ++i) {
+            float t = (float)i / (float)sampleRate;
+            float sampleVal = 0.0f;
+
+            if (preset == SoundPreset::WaterDrop) {
+                // Pristine water droplet: frequency drops gracefully from 1250Hz to 620Hz
+                float freq = 620.0f + 630.0f * expf(-18.0f * t);
+                phase1 += 2.0 * 3.1415926535 * freq / sampleRate;
+                float env = (t < 0.008f) ? (t / 0.008f) : expf(-14.0f * (t - 0.008f));
+                sampleVal = 0.85f * env * sinf((float)phase1);
+            } else if (preset == SoundPreset::AmbientEcho) {
+                // Warm ambient harmonic chord: C5 (523Hz), E5 (659Hz), G5 (784Hz)
+                phase1 += 2.0 * 3.1415926535 * 523.25 / sampleRate;
+                phase2 += 2.0 * 3.1415926535 * 659.25 / sampleRate;
+                phase3 += 2.0 * 3.1415926535 * 783.99 / sampleRate;
+                float env = (t < 0.045f) ? (t / 0.045f) : expf(-2.8f * (t - 0.045f));
+                sampleVal = 0.35f * env * (sinf((float)phase1) + 0.7f * sinf((float)phase2) + 0.5f * sinf((float)phase3));
+            } else if (preset == SoundPreset::WoodTap) {
+                // Gentle wood tap: 460Hz dampened impulse
+                phase1 += 2.0 * 3.1415926535 * 460.0 / sampleRate;
+                float env = (t < 0.003f) ? (t / 0.003f) : expf(-38.0f * (t - 0.003f));
+                sampleVal = 0.75f * env * sinf((float)phase1);
+            }
+
+            sampleVal = std::clamp(sampleVal, -1.0f, 1.0f);
+            pSamples[i] = (short)(sampleVal * 32767.0f);
+        }
+        LOG_INFO("AudioEngine: Synthesized preset " + std::to_string((int)preset) + " successfully");
+        return;
+    }
+
+    // 1. Try custom user sound path if configured and preset is Custom
     std::wstring customPath = Settings::Instance().Get().customSoundPath;
-    if (!customPath.empty() && std::filesystem::exists(customPath)) {
+    if (preset == SoundPreset::Custom && !customPath.empty() && std::filesystem::exists(customPath)) {
         hr = MFCreateSourceReaderFromURL(customPath.c_str(), nullptr, &pReader);
         if (SUCCEEDED(hr) && pReader) {
             LOG_INFO("AudioEngine: Loading custom notification sound from disk");
         }
     }
 
-    // 2. Try default audio file relative to executable (audio\diode_matrix.mp3, audio\notification.mp3, etc.)
+    // 2. Default Chime: load audio/diode_matrix.mp3 relative to executable
     if (!pReader) {
         wchar_t path[MAX_PATH];
         GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -213,14 +263,14 @@ void AudioEngine::GenerateDefaultWav() {
     LOG_INFO("AudioEngine: Audio decoded successfully, bytes: " + std::to_string(m_audioData.size()));
 }
 
-void AudioEngine::PlayReminder() {
+void AudioEngine::PlayReminder(float volumeOverride) {
     if (!m_initialized || !m_pSourceVoice || m_audioData.empty()) {
         MessageBeep(MB_ICONASTERISK); // Fallback
         return;
     }
 
     auto& s = Settings::Instance().Get();
-    if (!s.soundEnabled) return;
+    if (!s.soundEnabled && volumeOverride < 0.0f) return;
 
     // Ensure playback isn't stacking out of control
     m_pSourceVoice->Stop();
@@ -233,18 +283,11 @@ void AudioEngine::PlayReminder() {
 
     HRESULT hr = m_pSourceVoice->SubmitSourceBuffer(&buffer);
     if (SUCCEEDED(hr)) {
-        // Apply dedicated app volume (0.0 to 1.0)
-        // XAudio2 respects the master Windows volume automatically on the session.
-        float vol = s.soundVolume / 100.0f;
-        
-        // Logarithmic volume scaling approximation
-        // Windows uses a roughly logarithmic curve. So x^2 is a common approximation.
-        // If 50% is chosen, 0.5^2 = 0.25 amplitude is more natural sounding.
+        float vol = (volumeOverride >= 0.0f) ? std::clamp(volumeOverride, 0.0f, 1.0f) : (s.soundVolume / 100.0f);
         float amp = vol * vol;
-        
         m_pSourceVoice->SetVolume(amp);
         m_pSourceVoice->Start(0);
-        LOG_INFO("AudioEngine: Playing notification sound");
+        LOG_INFO("AudioEngine: Playing notification sound at volume " + std::to_string(vol));
     } else {
         LOG_WARN("AudioEngine: SubmitSourceBuffer failed");
         MessageBeep(MB_ICONASTERISK);

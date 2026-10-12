@@ -1,11 +1,17 @@
 # Build directories
 build/
+build_*/
 out/
 release/
+release_*/
+package/
+package_*/
 Debug/
 Release/
 *Portable*/
 *.zip
+*.AppImage
+*.dmg
 
 # CMake files
 CMakeCache.txt

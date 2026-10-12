@@ -1,68 +1,96 @@
 #include "Scheduler.h"
 #include "Settings.h"
 #include "Logger.h"
-#include "../../src/resource.h"
-#include "../ui/TrayIcon.h"
 #include <algorithm>
 #include <cstring>
+#include <chrono>
 
 namespace dhikr {
+
+static inline void SafeLocalTime(struct tm* tm, const time_t* time) {
+#ifdef _WIN32
+    localtime_s(tm, time);
+#else
+    localtime_r(time, tm);
+#endif
+}
 
 Scheduler& Scheduler::Instance() {
     static Scheduler instance;
     return instance;
 }
 
-void Scheduler::Start(HWND hwnd) {
+void Scheduler::Start(TriggerCallback onTrigger) {
     if (m_running) return;
-    m_hwnd = hwnd;
-
-    // Create synchronisation primitives
-    m_stopEvent   = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    m_recalcEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    m_timerHandle = CreateWaitableTimerW(nullptr, FALSE, nullptr); // auto-reset
-
+    m_onTrigger = std::move(onTrigger);
+    m_recalcRequested = false;
     m_running = true;
-    m_thread  = std::thread(&Scheduler::WorkerThread, this);
-
+    m_thread = std::thread(&Scheduler::WorkerThread, this);
     LOG_INFO("Scheduler started");
 }
+
+#ifdef _WIN32
+void Scheduler::Start(HWND hwnd) {
+    m_hwnd = hwnd;
+    Start([hwnd]() {
+        if (hwnd) {
+            PostMessageW(hwnd, WM_APP + 1 /* WM_REMINDER_TRIGGER */, 0, 0);
+        }
+    });
+}
+#endif
 
 void Scheduler::Stop() {
     if (!m_running) return;
     m_running = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_recalcRequested = true;
+    }
+    m_cv.notify_all();
 
-    if (m_stopEvent != INVALID_HANDLE_VALUE)   SetEvent(m_stopEvent);
-    if (m_thread.joinable()) m_thread.join();
-
-    if (m_timerHandle != INVALID_HANDLE_VALUE) { CloseHandle(m_timerHandle); m_timerHandle = INVALID_HANDLE_VALUE; }
-    if (m_stopEvent   != INVALID_HANDLE_VALUE) { CloseHandle(m_stopEvent);   m_stopEvent   = INVALID_HANDLE_VALUE; }
-    if (m_recalcEvent != INVALID_HANDLE_VALUE) { CloseHandle(m_recalcEvent); m_recalcEvent = INVALID_HANDLE_VALUE; }
-
+    if (m_thread.joinable()) {
+        m_thread.join();
+    }
     LOG_INFO("Scheduler stopped");
 }
 
 void Scheduler::Recalculate() {
-    if (m_recalcEvent != INVALID_HANDLE_VALUE) SetEvent(m_recalcEvent);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_recalcRequested = true;
+    }
+    m_cv.notify_all();
 }
 
 void Scheduler::TriggerNow() {
-    if (m_hwnd) PostMessageW(m_hwnd, WM_REMINDER_TRIGGER, 0, 0);
+    m_lastFiredTime = time(nullptr);
+#ifdef _WIN32
+    if (m_hwnd) {
+        PostMessageW(m_hwnd, WM_APP + 1 /* WM_REMINDER_TRIGGER */, 1, 0);
+        return;
+    }
+#endif
+    if (m_onTrigger) {
+        m_onTrigger();
+    }
 }
 
 void Scheduler::Pause(int durationMinutes) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (durationMinutes <= 0) {
-        // Pause until end of day
-        time_t now = time(nullptr);
-        struct tm lt;
-        localtime_s(&lt, &now);
-        lt.tm_hour = 23; lt.tm_min = 59; lt.tm_sec = 59;
-        m_pauseUntil = mktime(&lt);
-    } else {
-        m_pauseUntil = time(nullptr) + durationMinutes * 60;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (durationMinutes <= 0) {
+            // Pause until end of day
+            time_t now = time(nullptr);
+            struct tm lt;
+            SafeLocalTime(&lt, &now);
+            lt.tm_hour = 23; lt.tm_min = 59; lt.tm_sec = 59;
+            m_pauseUntil = mktime(&lt);
+        } else {
+            m_pauseUntil = time(nullptr) + durationMinutes * 60;
+        }
+        m_state = ScheduleState::Paused;
     }
-    m_state = ScheduleState::Paused;
 
     // Persist pause state
     auto& s = Settings::Instance().Get();
@@ -77,7 +105,7 @@ void Scheduler::Pause(int durationMinutes) {
 void Scheduler::PauseUntilTomorrow() {
     time_t now = time(nullptr);
     struct tm lt;
-    localtime_s(&lt, &now);
+    SafeLocalTime(&lt, &now);
     // Midnight tomorrow
     lt.tm_mday += 1;
     lt.tm_hour = 0; lt.tm_min = 0; lt.tm_sec = 0;
@@ -86,9 +114,11 @@ void Scheduler::PauseUntilTomorrow() {
 }
 
 void Scheduler::Resume() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_pauseUntil = 0;
-    m_state = ScheduleState::Active;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_pauseUntil = 0;
+        m_state = ScheduleState::Active;
+    }
     auto& s = Settings::Instance().Get();
     s.paused = false;
     s.pauseUntilUnix = 0;
@@ -118,59 +148,60 @@ void Scheduler::OnSystemWake() {
     Recalculate();
 }
 
-// ── Worker thread ─────────────────────────────────────────────────────────────
+// ── Worker thread (C++20 condition_variable) ──────────────────────────────────
 void Scheduler::WorkerThread() {
-    HANDLE waitHandles[3] = { m_stopEvent, m_recalcEvent, m_timerHandle };
-
     while (m_running) {
-        // Compute the next scheduled time
         time_t nextFire = ComputeNextReminderTime();
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_nextFire = nextFire;
         }
 
+        std::unique_lock<std::mutex> lock(m_mutex);
         if (nextFire == 0) {
-            // No reminder scheduled — wait for recalculation signal or stop
-            DWORD result = WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
-            if (result == WAIT_OBJECT_0) break; // stop
-            continue; // recalc
+            // No reminder scheduled in current window — sleep until wake or recalc
+            m_cv.wait(lock, [this]() { return !m_running || m_recalcRequested; });
+            m_recalcRequested = false;
+            if (!m_running) break;
+            continue;
         }
 
-        // Set the waitable timer to fire at nextFire
-        LARGE_INTEGER dueTime;
-        time_t now = time(nullptr);
-        long long delay100ns = (long long)(nextFire - now) * 10000000LL;
-        if (delay100ns <= 0) delay100ns = 1; // fire almost immediately
-        dueTime.QuadPart = -delay100ns; // relative time (negative = relative to now)
+        auto targetPoint = std::chrono::system_clock::from_time_t(nextFire);
+        bool timeoutReached = !m_cv.wait_until(lock, targetPoint, [this]() {
+            return !m_running || m_recalcRequested;
+        });
 
-        SetWaitableTimer(m_timerHandle, &dueTime, 0, nullptr, nullptr, FALSE);
+        if (!m_running) break;
 
-        DWORD result = WaitForMultipleObjects(3, waitHandles, FALSE, INFINITE);
+        if (m_recalcRequested) {
+            m_recalcRequested = false;
+            continue;
+        }
 
-        if (result == WAIT_OBJECT_0) {
-            break; // stop event
-        } else if (result == WAIT_OBJECT_0 + 1) {
-            continue; // recalc event — recompute and reset timer
-        } else if (result == WAIT_OBJECT_0 + 2) {
-            // Timer fired — verify we're still in schedule
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                // Check pause expired?
-                if (m_pauseUntil != 0 && time(nullptr) >= m_pauseUntil) {
-                    m_pauseUntil = 0;
-                    auto& s = Settings::Instance().Get();
-                    s.paused = false;
-                    s.pauseUntilUnix = 0;
-                    Settings::Instance().Save();
-                    TrayIcon::Instance().SetPaused(false);
-                }
+        if (timeoutReached) {
+            // Timer fired — check if pause expired
+            if (m_pauseUntil != 0 && time(nullptr) >= m_pauseUntil) {
+                m_pauseUntil = 0;
+                auto& s = Settings::Instance().Get();
+                s.paused = false;
+                s.pauseUntilUnix = 0;
+                Settings::Instance().Save();
+                Settings::Instance().NotifyChanged();
             }
 
-            // Final check before firing
+            // Verify reminder can trigger
             auto& s = Settings::Instance().Get();
             if (s.remindersEnabled && !IsPaused()) {
-                if (m_hwnd) PostMessageW(m_hwnd, WM_REMINDER_TRIGGER, 0, 0);
+                time_t nowT = time(nullptr);
+                if (nowT - m_lastFiredTime.load() >= 20) {
+                    m_lastFiredTime = nowT;
+                    auto callback = m_onTrigger;
+                    lock.unlock(); // Unlock while dispatching event
+                    if (callback) {
+                        callback();
+                    }
+                    lock.lock();
+                }
             }
         }
     }
@@ -198,7 +229,7 @@ time_t Scheduler::ComputeNextReminderTime() const {
 
     time_t now = time(nullptr);
     struct tm lt;
-    localtime_s(&lt, &now);
+    SafeLocalTime(&lt, &now);
 
     time_t nextFireTime = 0;
 
@@ -206,7 +237,7 @@ time_t Scheduler::ComputeNextReminderTime() const {
     for (int daysAhead = -1; daysAhead <= 7; ++daysAhead) {
         int searchDow = (lt.tm_wday + daysAhead) % 7;
         if (searchDow < 0) searchDow += 7;
-        
+
         auto& ds = s.weeklySchedule[searchDow];
         if (!ds.enabled) continue;
 
@@ -233,7 +264,7 @@ time_t Scheduler::ComputeNextReminderTime() const {
 
             if (fireTime > now) {
                 struct tm fireLt;
-                localtime_s(&fireLt, &fireTime);
+                SafeLocalTime(&fireLt, &fireTime);
                 if (!IsQuietTime(s, fireLt)) {
                     nextFireTime = fireTime;
                     break;
@@ -261,7 +292,7 @@ time_t Scheduler::ComputeNextReminderTime() const {
         int endMin = ds.endHour * 60 + ds.endMin;
         int duration = (endMin > startMin) ? (endMin - startMin) : (24 * 60 - startMin + endMin);
         if (duration == 0) duration = 24 * 60;
-        
+
         struct tm startTm = midnight;
         startTm.tm_min += startMin;
         time_t absStart = mktime(&startTm);

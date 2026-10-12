@@ -8,7 +8,9 @@ ID2D1Bitmap* ResourceLoader::LoadBitmapFromResource(
     int resourceId,
     IWICImagingFactory* pWicFactory,
     ID2D1RenderTarget* pRenderTarget,
-    const wchar_t* resourceType)
+    const wchar_t* resourceType,
+    UINT targetWidth,
+    UINT targetHeight)
 {
     if (!pWicFactory || !pRenderTarget) {
         LOG_WARN("ResourceLoader: WIC factory or RenderTarget is null");
@@ -68,6 +70,8 @@ ID2D1Bitmap* ResourceLoader::LoadBitmapFromResource(
         return nullptr;
     }
 
+    // 1. Convert source frame to 32bpp PBGRA (Premultiplied Alpha) FIRST
+    // Scaling in premultiplied color space prevents dark edge fringes and preserve anti-aliased alpha blending
     IWICFormatConverter* pConverter = nullptr;
     hr = pWicFactory->CreateFormatConverter(&pConverter);
     if (FAILED(hr) || !pConverter) {
@@ -84,17 +88,35 @@ ID2D1Bitmap* ResourceLoader::LoadBitmapFromResource(
         nullptr,
         0.0f,
         WICBitmapPaletteTypeCustom);
-
-    ID2D1Bitmap* pBitmap = nullptr;
-    if (SUCCEEDED(hr)) {
-        hr = pRenderTarget->CreateBitmapFromWicBitmap(pConverter, nullptr, &pBitmap);
-        if (FAILED(hr)) {
-            LOG_WARN("ResourceLoader: CreateBitmapFromWicBitmap failed");
-        }
-    } else {
+    if (FAILED(hr)) {
         LOG_WARN("ResourceLoader: FormatConverter Initialize failed");
+        pConverter->Release();
+        pFrame->Release();
+        pDecoder->Release();
+        return nullptr;
     }
 
+    // 2. High-quality bicubic downsampler on premultiplied pixels
+    IWICBitmapSource* pFinalSource = pConverter;
+    IWICBitmapScaler* pScaler = nullptr;
+    if (targetWidth > 0 && targetHeight > 0) {
+        hr = pWicFactory->CreateBitmapScaler(&pScaler);
+        if (SUCCEEDED(hr) && pScaler) {
+            // WICBitmapInterpolationModeHighQualityCubic (0x4) produces razor-sharp, smooth anti-aliased downsampling
+            hr = pScaler->Initialize(pConverter, targetWidth, targetHeight, WICBitmapInterpolationModeHighQualityCubic);
+            if (SUCCEEDED(hr)) {
+                pFinalSource = pScaler;
+            }
+        }
+    }
+
+    ID2D1Bitmap* pBitmap = nullptr;
+    hr = pRenderTarget->CreateBitmapFromWicBitmap(pFinalSource, nullptr, &pBitmap);
+    if (FAILED(hr)) {
+        LOG_WARN("ResourceLoader: CreateBitmapFromWicBitmap failed");
+    }
+
+    if (pScaler) pScaler->Release();
     pConverter->Release();
     pFrame->Release();
     pDecoder->Release();

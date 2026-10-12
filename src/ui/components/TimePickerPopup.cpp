@@ -41,11 +41,20 @@ void TimePickerPopup::Show(HWND parent, int x, int y, int initialHour, int initi
     float w = 240.f * m_dpiScale;
     float h = 180.f * m_dpiScale;
 
-    // Keep on screen
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
-    if (x + w > screenW) x = screenW - (int)w;
-    if (y + h > screenH) y = screenH - (int)h;
+    // Keep on screen (multi-monitor aware)
+    POINT pt = { x, y };
+    HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    if (!hMon && parent) {
+        hMon = MonitorFromWindow(parent, MONITOR_DEFAULTTONEAREST);
+    }
+    MONITORINFO mi = { sizeof(mi) };
+    if (hMon && GetMonitorInfoW(hMon, &mi)) {
+        RECT work = mi.rcWork;
+        if (x + (int)w > work.right - 8) x = work.right - (int)w - 8;
+        if (x < work.left + 8) x = work.left + 8;
+        if (y + (int)h > work.bottom - 8) y = work.bottom - (int)h - 8;
+        if (y < work.top + 8) y = work.top + 8;
+    }
 
     m_hwnd = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
@@ -71,14 +80,15 @@ void TimePickerPopup::Show(HWND parent, int x, int y, int initialHour, int initi
 
     m_dwf = Application::Instance().DWriteFactory();
     if (m_dwf) {
-        m_dwf->CreateTextFormat(L"Noto Sans", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+        const wchar_t* fontName = ds::Font::Arabic();
+        m_dwf->CreateTextFormat(fontName, nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, 32.f * m_dpiScale, L"en-US", &m_tfBig);
         if (m_tfBig) {
             m_tfBig->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             m_tfBig->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
 
-        m_dwf->CreateTextFormat(L"Noto Sans", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+        m_dwf->CreateTextFormat(fontName, nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, ds::FontSize::BtnLabel * m_dpiScale, L"en-US", &m_tfBtn);
         if (m_tfBtn) {
             m_tfBtn->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -241,14 +251,15 @@ LRESULT TimePickerPopup::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         if (m_tfBtn) { m_tfBtn->Release(); m_tfBtn = nullptr; }
 
         if (m_dwf) {
-            m_dwf->CreateTextFormat(L"Noto Sans", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            const wchar_t* fontName = ds::Font::Arabic();
+            m_dwf->CreateTextFormat(fontName, nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_STRETCH_NORMAL, 32.f * m_dpiScale, L"en-US", &m_tfBig);
             if (m_tfBig) {
                 m_tfBig->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 m_tfBig->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             }
 
-            m_dwf->CreateTextFormat(L"Noto Sans", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+            m_dwf->CreateTextFormat(fontName, nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_STRETCH_NORMAL, ds::FontSize::BtnLabel * m_dpiScale, L"en-US", &m_tfBtn);
             if (m_tfBtn) {
                 m_tfBtn->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);

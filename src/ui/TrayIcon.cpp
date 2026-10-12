@@ -44,10 +44,16 @@ bool TrayIcon::Create(HWND hwndParent, HINSTANCE hInstance) {
     Shell_NotifyIconW(NIM_DELETE, &m_nid);
 
     BOOL ok = FALSE;
-    for (int attempt = 0; attempt < 5; ++attempt) {
+    for (int attempt = 0; attempt < 8; ++attempt) {
         m_nid.cbSize = sizeof(NOTIFYICONDATAW);
         ok = Shell_NotifyIconW(NIM_ADD, &m_nid);
         if (ok) break;
+
+        // If icon already exists in Shell cache, NIM_MODIFY will succeed
+        if (Shell_NotifyIconW(NIM_MODIFY, &m_nid)) {
+            ok = TRUE;
+            break;
+        }
 
         // Try V3/V4 size compatibility fallback
         m_nid.cbSize = NOTIFYICONDATAW_V3_SIZE;
@@ -58,7 +64,7 @@ bool TrayIcon::Create(HWND hwndParent, HINSTANCE hInstance) {
         ok = Shell_NotifyIconW(NIM_ADD, &m_nid);
         if (ok) break;
 
-        Sleep(50);
+        Sleep(100);
     }
 
     if (!ok) {
@@ -67,6 +73,7 @@ bool TrayIcon::Create(HWND hwndParent, HINSTANCE hInstance) {
         return false;
     }
 
+    m_nid.cbSize = sizeof(NOTIFYICONDATAW);
     m_nid.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &m_nid);
     m_created = true;
@@ -75,13 +82,41 @@ bool TrayIcon::Create(HWND hwndParent, HINSTANCE hInstance) {
     return true;
 }
 
-void TrayIcon::UpdateIcon() {
+void TrayIcon::UpdateIcon(ColorTheme themeOverride) {
     if (!m_created) return;
     int cx = GetSystemMetrics(SM_CXSMICON);
     if (cx <= 0) cx = 16;
-    HICON hIcon = (HICON)LoadImageW(m_hInst, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, cx, cx, LR_DEFAULTCOLOR);
+    if (m_dynamicIcon) {
+        DestroyIcon(m_dynamicIcon);
+        m_dynamicIcon = nullptr;
+    }
+    int resId = IDI_APP_ICON_SMALL;
+    int fallbackRes = IDI_APP_ICON;
+
+    ColorTheme currentTheme = (themeOverride != static_cast<ColorTheme>(-1)) 
+        ? themeOverride 
+        : Settings::Instance().Get().colorTheme;
+
+    if (m_paused) {
+        resId = IDI_APP_DORMANT_SMALL;
+        fallbackRes = IDI_APP_DORMANT_ICON;
+    } else {
+        switch (currentTheme) {
+            case ColorTheme::Yellow: resId = IDI_APP_YELLOW_SMALL; fallbackRes = IDI_APP_YELLOW_ICON; break;
+            case ColorTheme::Blue:   resId = IDI_APP_BLUE_SMALL;   fallbackRes = IDI_APP_BLUE_ICON;   break;
+            case ColorTheme::Red:    resId = IDI_APP_RED_SMALL;    fallbackRes = IDI_APP_RED_ICON;    break;
+            case ColorTheme::Silver: resId = IDI_APP_SILVER_SMALL; fallbackRes = IDI_APP_SILVER_ICON; break;
+            case ColorTheme::Gold:   resId = IDI_APP_GOLD_SMALL;   fallbackRes = IDI_APP_GOLD_ICON;   break;
+            case ColorTheme::Green:
+            default:                 resId = IDI_APP_ICON_SMALL;   fallbackRes = IDI_APP_ICON;        break;
+        }
+    }
+    HICON hIcon = (HICON)LoadImageW(m_hInst, MAKEINTRESOURCEW(resId), IMAGE_ICON, cx, cx, LR_DEFAULTCOLOR);
     if (!hIcon) {
-        hIcon = LoadIconW(m_hInst, MAKEINTRESOURCEW(IDI_APP_ICON));
+        hIcon = LoadIconW(m_hInst, MAKEINTRESOURCEW(resId));
+    }
+    if (!hIcon) {
+        hIcon = LoadIconW(m_hInst, MAKEINTRESOURCEW(fallbackRes));
     }
     if (hIcon) {
         m_nid.hIcon = hIcon;
@@ -123,9 +158,9 @@ void TrayIcon::ShowBalloon(const std::wstring& title,
 void TrayIcon::SetPaused(bool paused) {
     m_paused = paused;
     if (!m_created) return;
-    // Could swap icon here; for now just update tooltip
     std::wstring tip = std::wstring(ApplicationMetadata::AppName) + (paused ? L" — Paused" : L" — Active");
     UpdateTooltip(tip);
+    UpdateIcon();
 }
 
 void TrayIcon::HandleMessage(HWND hwnd, LPARAM lParam) {

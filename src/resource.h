@@ -3,9 +3,37 @@
 // ── Resource IDs ────────────────────────────────────────────────────────────
 #define IDI_APP_ICON          101
 #define IDI_APP_ICON_SMALL    102
+#define IDI_APP_DORMANT_ICON  104
+#define IDI_APP_DORMANT_SMALL 105
+#define IDI_APP_YELLOW_ICON   106
+#define IDI_APP_YELLOW_SMALL  107
+#define IDI_APP_BLUE_ICON     108
+#define IDI_APP_BLUE_SMALL    109
+#define IDI_APP_RED_ICON      110
+#define IDI_APP_RED_SMALL     111
+#define IDI_APP_SILVER_ICON   112
+#define IDI_APP_SILVER_SMALL  113
+#define IDI_APP_GOLD_ICON     114
+#define IDI_APP_GOLD_SMALL    115
 #define IDR_REMINDER_SOUND    103
 #define IDR_LOGO              200   // PNG logo, embedded in .rc, loaded via WIC
 #define IDR_CONTENT_MD        201   // Markdown content embedded in .rc
+#define IDR_LOGO_SMALL        202   // High-performance cropped circular logo
+#define IDR_FONT_CAIRO        203   // Embedded Cairo Arabic font
+#define IDR_QR_VODAFONE       204   // Vodafone Cash QR image
+#define IDR_QR_IBAN           205   // Banque Misr IBAN QR image
+#define IDR_LOGO_DORMANT      206   // Silver/chrome dormant logo
+#define IDR_LOGO_DORMANT_SMALL 207  // Cropped silver/chrome dormant logo
+#define IDR_LOGO_YELLOW       208
+#define IDR_LOGO_YELLOW_SMALL 209
+#define IDR_LOGO_BLUE         210
+#define IDR_LOGO_BLUE_SMALL   211
+#define IDR_LOGO_RED          212
+#define IDR_LOGO_RED_SMALL    213
+#define IDR_LOGO_SILVER       214
+#define IDR_LOGO_SILVER_SMALL 215
+#define IDR_LOGO_GOLD         216
+#define IDR_LOGO_GOLD_SMALL   217
 #define IDR_MANIFEST          1
 
 // ── Tray menu IDs ───────────────────────────────────────────────────────────
@@ -63,8 +91,7 @@
 // ── Page IDs ────────────────────────────────────────────────────────────────
 #define PAGE_HOME         0
 #define PAGE_REMINDERS    1
-#define PAGE_SCHEDULE     2
-#define PAGE_LIBRARY      3
-#define PAGE_STATISTICS   4
-#define PAGE_SETTINGS     5
-#define PAGE_ABOUT        6
+#define PAGE_LIBRARY      2
+#define PAGE_SETTINGS     3
+#define PAGE_ABOUT        4
+#define PAGE_COUNT        5

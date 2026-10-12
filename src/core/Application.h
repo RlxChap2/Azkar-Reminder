@@ -78,6 +78,7 @@ private:
 
     bool             m_initialized   = false;
     bool             m_shuttingDown  = false;
+    HANDLE           m_hCairoFont    = nullptr;
 };
 
 } // namespace dhikr

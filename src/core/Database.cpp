@@ -12,15 +12,14 @@ Database& Database::Instance() {
     return instance;
 }
 
-bool Database::Open(const std::wstring& dbPath) {
+bool Database::Open(const std::filesystem::path& dbPath) {
     if (m_db) {
         LOG_WARN("Database already open");
         return true;
     }
 
-    int size = WideCharToMultiByte(CP_UTF8, 0, dbPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string utf8Path(size, 0);
-    WideCharToMultiByte(CP_UTF8, 0, dbPath.c_str(), -1, utf8Path.data(), size, nullptr, nullptr);
+    auto u8 = dbPath.u8string();
+    std::string utf8Path(u8.begin(), u8.end());
     LOG_INFO("Opening SQLite database at: " + utf8Path);
 
     int rc = sqlite3_open_v2(utf8Path.c_str(), &m_db,
@@ -236,6 +235,36 @@ std::vector<DailyStat> Database::GetDailyStats(int days) {
     return result;
 }
 
+std::vector<ReminderEvent> Database::GetRecentEvents(int limit) {
+    std::vector<ReminderEvent> result;
+    if (!m_db) return result;
+
+    const char* sql =
+        "SELECT id, timestamp, content_id, category, action "
+        "FROM reminder_events "
+        "ORDER BY id DESC LIMIT ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
+    sqlite3_bind_int(stmt, 1, limit);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        ReminderEvent evt{};
+        evt.id = sqlite3_column_int64(stmt, 0);
+        const char* ts  = (const char*)sqlite3_column_text(stmt, 1);
+        const char* cid = (const char*)sqlite3_column_text(stmt, 2);
+        const char* cat = (const char*)sqlite3_column_text(stmt, 3);
+        const char* act = (const char*)sqlite3_column_text(stmt, 4);
+        if (ts)  evt.timestamp = ts;
+        if (cid) evt.contentId = cid;
+        if (cat) evt.category  = cat;
+        if (act) evt.action    = act;
+        result.push_back(evt);
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
 std::vector<std::string> Database::GetRecentContentIds(int limit) {
     std::vector<std::string> result;
     if (!m_db) return result;
@@ -253,6 +282,30 @@ std::vector<std::string> Database::GetRecentContentIds(int limit) {
     return result;
 }
 
+std::vector<std::pair<std::string, int>> Database::GetTopDhikrs(int limit) {
+    std::vector<std::pair<std::string, int>> result;
+    if (!m_db) return result;
+
+    const char* sql =
+        "SELECT content_id, COUNT(*) as cnt "
+        "FROM reminder_events "
+        "WHERE action = 'delivered' "
+        "GROUP BY content_id "
+        "ORDER BY cnt DESC LIMIT ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
+    sqlite3_bind_int(stmt, 1, limit);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char* cid = (const char*)sqlite3_column_text(stmt, 0);
+        int count = sqlite3_column_int(stmt, 1);
+        if (cid) {
+            result.push_back({std::string(cid), count});
+        }
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
 
 bool Database::Vacuum() {
     return ExecuteSimple("VACUUM;");

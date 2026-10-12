@@ -1,26 +1,35 @@
-name: Build and Release
+name: Build and Multi-Platform Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
 
 jobs:
-  build:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. WINDOWS BUILD
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Windows (x64)
     runs-on: windows-latest
-    
+
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Configure CMake
       run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-      
-    - name: Build
+
+    - name: Build Core Tests & Windows App
       run: cmake --build build --config Release
-      
-    - name: Verify Output
+
+    - name: Run Core Unit Tests
+      run: .\build\Release\azkar_core_tests.exe
+
+    - name: Verify Windows Binaries
       run: |
         if (!(Test-Path "build\bin\Release\AzkarReminder.exe")) { throw "Executable not found" }
         if (!(Test-Path "build\bin\Release\audio\diode_matrix.mp3")) { throw "Audio asset not found" }
@@ -30,16 +39,170 @@ jobs:
       with:
         iscc: installer/AzkarReminder.iss
 
-    - name: Upload Installer Artifact
-      uses: actions/upload-artifact@v3
+    - name: Upload Windows Installer
+      uses: actions/upload-artifact@v4
       with:
-        name: AzkarReminder-Setup-v1.1.0
+        name: AzkarReminder-Windows-Setup
         path: release/AzkarReminder-Setup-v1.1.0.exe
 
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/v')
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. LINUX BUILD (Qt 6 + AppImage)
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-linux:
+    name: Linux (x86_64 AppImage)
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          ninja-build \
+          qt6-base-dev \
+          qt6-base-dev-tools \
+          libgl1-mesa-dev \
+          libasound2-dev \
+          libpulse-dev \
+          libx11-dev
+
+    - name: Configure CMake
+      run: |
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_QT_APP=ON
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Run Core Unit Tests
+      run: ./build/azkar_core_tests
+
+    - name: Package AppImage Structure
+      run: |
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        mkdir -p AppDir/usr/share/azkar-reminder/audio
+        
+        cp build/azkar_reminder AppDir/usr/bin/
+        if [ -f assets/audio/diode_matrix.mp3 ]; then
+          cp assets/audio/diode_matrix.mp3 AppDir/usr/share/azkar-reminder/audio/
+        fi
+        
+        if [ -f assets/images/logo.png ]; then
+          cp assets/images/logo.png AppDir/azkar-reminder.png
+          cp assets/images/logo.png AppDir/.DirIcon
+          cp assets/images/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/azkar-reminder.png
+        fi
+
+        # Create Desktop Entry
+        cat <<EOF > AppDir/azkar-reminder.desktop
+        [Desktop Entry]
+        Type=Application
+        Name=Azkar Reminder
+        Exec=azkar_reminder
+        Icon=azkar-reminder
+        Categories=Utility;Clock;Qt;
+        Terminal=false
+        EOF
+        
+        # Create AppRun launcher
+        cat <<'EOF' > AppDir/AppRun
+        #!/bin/sh
+        HERE="$(dirname "$(readlink -f "${0}")")"
+        export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+        export PATH="${HERE}/usr/bin:${PATH}"
+        exec "${HERE}/usr/bin/azkar_reminder" "$@"
+        EOF
+        chmod +x AppDir/AppRun
+
+        # Download appimagetool
+        wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+        chmod +x appimagetool
+        ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir AzkarReminder-x86_64.AppImage
+
+    - name: Upload Linux AppImage
+      uses: actions/upload-artifact@v4
+      with:
+        name: AzkarReminder-Linux-AppImage
+        path: AzkarReminder-x86_64.AppImage
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. macOS BUILD (Qt 6 + DMG)
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-macos:
+    name: macOS (Universal / x86_64 & arm64)
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Qt 6 via Homebrew
+      run: |
+        brew install qt@6 ninja create-dmg
+        brew link --force qt@6
+
+    - name: Configure CMake
+      run: |
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)" \
+          -DBUILD_QT_APP=ON
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Run Core Unit Tests
+      run: ./build/azkar_core_tests
+
+    - name: Package macOS App Bundle into DMG
+      run: |
+        if [ -d "build/azkar_reminder.app" ]; then
+          APP_PATH="build/azkar_reminder.app"
+        else
+          APP_PATH="build/Azkar Reminder.app"
+        fi
+        
+        # Deploy Qt dependencies into bundle
+        macdeployqt "${APP_PATH}" -dmg || true
+        
+        # Fallback DMG creation if macdeployqt did not produce dmg
+        if [ ! -f "build/*.dmg" ]; then
+          hdiutil create -volname "Azkar Reminder" -srcfolder "${APP_PATH}" -ov -format UDZO "AzkarReminder-macOS.dmg"
+        fi
+
+    - name: Upload macOS DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: AzkarReminder-macOS-DMG
+        path: "*.dmg"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 4. GITHUB RELEASE
+  # ─────────────────────────────────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-linux, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download all build artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Create Private Draft GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        files: release/AzkarReminder-Setup-v1.1.0.exe
+        draft: true
+        prerelease: true
+        name: "Azkar Reminder v1.2.0 (Private Preview)"
+        files: |
+          AzkarReminder-Windows-Setup/*
+          AzkarReminder-Linux-AppImage/*
+          AzkarReminder-macOS-DMG/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

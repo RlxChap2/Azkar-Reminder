@@ -1,7 +1,9 @@
 #include "WindowChrome.h"
 #include "LogoRenderer.h"
+#include "../MainWindow.h"
 #include "../DesignSystem.h"
 #include "../../core/ApplicationMetadata.h"
+#include "../../core/Application.h"
 
 namespace dhikr {
 
@@ -14,7 +16,7 @@ void WindowChrome::UpdateMetrics(float dpiScale, int windowWidth, int windowHeig
 D2D1_RECT_F WindowChrome::GetCaptionBtnRect(int index) const {
     float btnW = ds::Dims::CaptionBtnW * m_dpiScale;
     float th = ds::Dims::TitleBarH * m_dpiScale;
-    float startX = m_width - btnW * 3;
+    float startX = m_width - btnW * 2;
     return D2D1::RectF(startX + (index - 1) * btnW, 0, startX + index * btnW, th);
 }
 
@@ -44,9 +46,9 @@ LRESULT WindowChrome::HitTest(HWND hwnd, int x, int y) {
 
     // Title bar area
     if (pt.y < th) {
-        // Caption buttons
+        // Caption buttons (Min, Close)
         float btnW = ds::Dims::CaptionBtnW * m_dpiScale;
-        float startX = m_width - btnW * 3;
+        float startX = m_width - btnW * 2;
         if (pt.x >= startX) return HTCLIENT; // Let client handle the buttons (WM_MOUSEMOVE/LBUTTONDOWN)
         
         return HTCAPTION; // Draggable area
@@ -65,27 +67,67 @@ void WindowChrome::Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, IDWr
     rt->DrawLine(D2D1::Point2F(0, th), D2D1::Point2F((float)m_width, th), brush, 0.5f);
 
     // Application Logo and Title
-    float logoSize = 20.f * m_dpiScale;
-    float startX = 16.f * m_dpiScale;
+    float logoSize = 22.f * m_dpiScale;
+    float startX = 14.f * m_dpiScale;
     float textX = startX;
 
     D2D1_RECT_F logoRect = D2D1::RectF(startX, (th - logoSize) / 2.f, startX + logoSize, (th + logoSize) / 2.f);
-    if (logo) {
-        D2D1_SIZE_F sz = logo->GetSize();
+    ID2D1Bitmap* chromeLogo = MainWindow::Instance().GetEffectiveLogo(true);
+    if (chromeLogo) {
+        D2D1_SIZE_F sz = chromeLogo->GetSize();
         D2D1_RECT_F fitRect = LogoRenderer::FitRect(logoRect, sz.width, sz.height);
-        rt->DrawBitmap(logo, fitRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        rt->DrawBitmap(chromeLogo, fitRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     } else {
         LogoRenderer::Draw(rt, logoRect, 1.0f);
     }
     textX += logoSize + 8.f * m_dpiScale;
 
+    float textWidth = 115.f * m_dpiScale;
     if (fontApp) {
+        IDWriteFactory* dwf = Application::Instance().DWriteFactory();
+        if (dwf) {
+            IDWriteTextLayout* layout = nullptr;
+            if (SUCCEEDED(dwf->CreateTextLayout(ApplicationMetadata::AppName, (UINT32)wcslen(ApplicationMetadata::AppName), fontApp, 400.f * m_dpiScale, th, &layout)) && layout) {
+                DWRITE_TEXT_METRICS tm;
+                layout->GetMetrics(&tm);
+                textWidth = tm.width;
+                layout->Release();
+            }
+        }
+
         brush->SetColor(ds::TextPrimary());
-        D2D1_RECT_F textRect = D2D1::RectF(textX, 0, 400.f * m_dpiScale, th);
+        D2D1_RECT_F textRect = D2D1::RectF(textX, 0, textX + textWidth, th);
         DWRITE_PARAGRAPH_ALIGNMENT pa = fontApp->GetParagraphAlignment();
         fontApp->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         rt->DrawTextW(ApplicationMetadata::AppName, (UINT32)wcslen(ApplicationMetadata::AppName), fontApp, textRect, brush);
         fontApp->SetParagraphAlignment(pa);
+    }
+
+    // Pill badge: v1.2
+    float badgeX = textX + textWidth + 12.f * m_dpiScale;
+    float badgeW = 62.f * m_dpiScale;
+    float badgeH = 19.f * m_dpiScale;
+    float badgeY = (th - badgeH) / 2.f;
+    D2D1_RECT_F badgeRect = D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
+    float badgeRadius = 4.f * m_dpiScale;
+
+    brush->SetColor(ds::Accent::Primary(0.12f));
+    rt->FillRoundedRectangle(D2D1::RoundedRect(badgeRect, badgeRadius, badgeRadius), brush);
+
+    brush->SetColor(ds::Accent::Primary(0.60f));
+    rt->DrawRoundedRectangle(D2D1::RoundedRect(badgeRect, badgeRadius, badgeRadius), brush, 1.0f);
+
+    IDWriteFactory* dwf = Application::Instance().DWriteFactory();
+    if (dwf) {
+        IDWriteTextFormat* tfBadge = nullptr;
+        if (SUCCEEDED(dwf->CreateTextFormat(L"Cairo", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10.5f * m_dpiScale, L"en-US", &tfBadge)) && tfBadge) {
+            tfBadge->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            tfBadge->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            brush->SetColor(ds::Accent::Primary());
+            const wchar_t* badgeText = L"v1.2";
+            rt->DrawTextW(badgeText, (UINT32)wcslen(badgeText), tfBadge, badgeRect, brush);
+            tfBadge->Release();
+        }
     }
 
     // Caption Buttons
@@ -96,19 +138,28 @@ void WindowChrome::Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, IDWr
     fontIcon->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     fontIcon->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
-    for (int i = 1; i <= 3; ++i) { // 1=min, 2=max, 3=close
+    for (int i = 1; i <= 2; ++i) { // 1=min, 2=close
         D2D1_RECT_F btnRect = GetCaptionBtnRect(i);
         
+        // Slightly inset visual hover pill so it harmonizes cleanly with rounded window corners
+        D2D1_RECT_F visualRect = btnRect;
+        visualRect.top += 3.f * m_dpiScale;
+        visualRect.bottom -= 3.f * m_dpiScale;
+        visualRect.left += 2.f * m_dpiScale;
+        visualRect.right -= (i == 2 ? 6.f * m_dpiScale : 2.f * m_dpiScale);
+
+        float radius = 4.f * m_dpiScale;
+
         if (m_pressedBtn == i) {
-            brush->SetColor(i == 3 ? ds::Rgba(0xC4, 0x2B, 0x1C) : ds::Rgba(0x33, 0x33, 0x33));
-            rt->FillRectangle(btnRect, brush);
+            brush->SetColor(i == 2 ? ds::Rgba(0xC4, 0x2B, 0x1C) : ds::Rgba(0x33, 0x33, 0x33));
+            rt->FillRoundedRectangle(D2D1::RoundedRect(visualRect, radius, radius), brush);
         } else if (m_hoveredBtn == i) {
-            brush->SetColor(i == 3 ? ds::Rgba(0xE8, 0x11, 0x23) : ds::CardHover());
-            rt->FillRectangle(btnRect, brush);
+            brush->SetColor(i == 2 ? ds::Rgba(0xE8, 0x11, 0x23) : ds::CardHover());
+            rt->FillRoundedRectangle(D2D1::RoundedRect(visualRect, radius, radius), brush);
         }
         
-        brush->SetColor((m_hoveredBtn == i && i == 3) ? ds::Rgba(0xFF, 0xFF, 0xFF) : ds::TextPrimary());
-        const wchar_t* glyph = (i == 1) ? ds::Icon::Minimize : (i == 2) ? ds::Icon::Maximize : ds::Icon::Close;
+        brush->SetColor((m_hoveredBtn == i && i == 2) ? ds::Rgba(0xFF, 0xFF, 0xFF) : ds::TextPrimary());
+        const wchar_t* glyph = (i == 1) ? ds::Icon::Minimize : ds::Icon::Close;
         rt->DrawTextW(glyph, 1, fontIcon, btnRect, brush);
     }
 
@@ -118,7 +169,7 @@ void WindowChrome::Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, IDWr
 
 bool WindowChrome::OnMouseMove(float x, float y) {
     int hover = 0;
-    for (int i = 1; i <= 3; ++i) {
+    for (int i = 1; i <= 2; ++i) {
         D2D1_RECT_F r = GetCaptionBtnRect(i);
         if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
             hover = i;
@@ -154,11 +205,7 @@ bool WindowChrome::OnLButtonUp(HWND hwnd, float x, float y) {
     m_pressedBtn = 0;
     if (pressed != 0 && pressed == m_hoveredBtn) {
         if (pressed == 1) ShowWindow(hwnd, SW_MINIMIZE);
-        else if (pressed == 2) {
-            if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
-            else ShowWindow(hwnd, SW_MAXIMIZE);
-        }
-        else if (pressed == 3) PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        else if (pressed == 2) PostMessageW(hwnd, WM_CLOSE, 0, 0);
         return true;
     }
     return pressed != 0;

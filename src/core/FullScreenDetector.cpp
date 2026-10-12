@@ -9,12 +9,13 @@ FullScreenDetector& FullScreenDetector::Instance() {
 }
 
 bool FullScreenDetector::IsFullScreenActive() const {
-    // 1. Check Windows user notification state (Direct3D full-screen, presentation mode, etc.)
+    // 1. Check Windows user notification state (Direct3D exclusive full-screen, presentation mode)
+    // Note: Do NOT check QUNS_BUSY here as Windows 10/11 frequently returns QUNS_BUSY (2)
+    // during ordinary desktop sessions, which was causing all notifications to be permanently blocked!
     QUERY_USER_NOTIFICATION_STATE qState;
     if (SUCCEEDED(SHQueryUserNotificationState(&qState))) {
         if (qState == QUNS_RUNNING_D3D_FULL_SCREEN ||
-            qState == QUNS_PRESENTATION_MODE ||
-            qState == QUNS_BUSY) {
+            qState == QUNS_PRESENTATION_MODE) {
             return true;
         }
     }

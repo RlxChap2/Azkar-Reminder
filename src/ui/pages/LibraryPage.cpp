@@ -18,8 +18,9 @@ LibraryPage::LibraryPage() {
     m_dpiScale = (float)GetDeviceCaps(hdc, LOGPIXELSX) / 96.f;
     ReleaseDC(nullptr, hdc);
 
+    const wchar_t* fontName = ds::Font::Arabic();
     auto mk = [&](float sz, DWRITE_FONT_WEIGHT wt, const wchar_t* locale, IDWriteTextFormat** out) {
-        dwf->CreateTextFormat(L"Noto Sans Arabic", nullptr, wt, DWRITE_FONT_STYLE_NORMAL,
+        dwf->CreateTextFormat(fontName, nullptr, wt, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, sz * m_dpiScale, locale, out);
     };
     mk(ds::FontSize::PageTitle, DWRITE_FONT_WEIGHT_SEMI_BOLD, L"en-US", &m_tfTitle);
@@ -37,6 +38,15 @@ LibraryPage::LibraryPage() {
     if (m_tfIcon) {
         m_tfIcon->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         m_tfIcon->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+
+    dwf->CreateTextFormat(
+        iconFont, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        14.f * m_dpiScale, L"en-US", &m_tfIconSmall);
+    if (m_tfIconSmall) {
+        m_tfIconSmall->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        m_tfIconSmall->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
 
     if (m_tfMain) {
@@ -60,6 +70,7 @@ LibraryPage::~LibraryPage() {
     if (m_tfCat)   { m_tfCat->Release();   m_tfCat   = nullptr; }
     if (m_tfEmpty) { m_tfEmpty->Release(); m_tfEmpty = nullptr; }
     if (m_tfIcon)  { m_tfIcon->Release();  m_tfIcon  = nullptr; }
+    if (m_tfIconSmall) { m_tfIconSmall->Release(); m_tfIconSmall = nullptr; }
     if (m_brush)   { m_brush->Release();   m_brush   = nullptr; }
 }
 
@@ -79,8 +90,9 @@ void LibraryPage::DrawEmptyState(ID2D1RenderTarget* rt, const D2D1_RECT_F& bound
 void LibraryPage::DrawFilterPills(ID2D1RenderTarget* rt, float x, float y, float w) {
     std::wstring filterStrings[] = {
         Localization::Instance().Get(L"library.filter_all"),
-        Localization::Instance().Get(L"library.filter_morning_evening"),
-        Localization::Instance().Get(L"library.filter_tasbih"),
+        Localization::Instance().Get(L"library.filter_morning"),
+        Localization::Instance().Get(L"library.filter_evening"),
+        Localization::Instance().Get(L"library.filter_daily"),
         Localization::Instance().Get(L"library.filter_custom")
     };
 
@@ -88,7 +100,7 @@ void LibraryPage::DrawFilterPills(ID2D1RenderTarget* rt, float x, float y, float
     float pillH = 26.f * m_dpiScale;
     float curX = isRtl ? (x + w) : x;
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         float pillW = (filterStrings[i].size() * 8.5f + 24.f) * m_dpiScale;
         float px = isRtl ? (curX - pillW) : curX;
         D2D1_RECT_F pr = D2D1::RectF(px, y, px + pillW, y + pillH);
@@ -126,8 +138,8 @@ void LibraryPage::DrawContentItem(ID2D1RenderTarget* rt, float x, float& y, floa
     float rx = ds::Dims::CardRadius * m_dpiScale;
     m_brush->SetColor(hovered ? ds::CardHover() : ds::Card());
     rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x+w, y+itemH), rx, rx), m_brush);
-    m_brush->SetColor(ds::Border());
-    rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x+w, y+itemH), rx, rx), m_brush, 0.5f);
+    m_brush->SetColor(hovered ? ds::BorderHighlight() : ds::Border());
+    rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x+w, y+itemH), rx, rx), m_brush, hovered ? 1.0f : 0.75f);
 
     // Accent strip for enabled items
     if (item.enabled) {
@@ -137,37 +149,57 @@ void LibraryPage::DrawContentItem(ID2D1RenderTarget* rt, float x, float& y, floa
         rt->FillRoundedRectangle(D2D1::RoundedRect(accent, 2, 2), m_brush);
     }
 
-    // Main text (Arabic, RTL)
-    if (m_tfMain && !item.text.empty()) {
-        m_brush->SetColor(item.enabled ? ds::TextPrimary() : ds::TextMuted());
-        D2D1_RECT_F tr = isRtl 
-            ? D2D1::RectF(x + 80*m_dpiScale, y + padY + 2.f*m_dpiScale, x + w - padX - 8*m_dpiScale, y + itemH - padY)
-            : D2D1::RectF(x + padX + 8*m_dpiScale, y + padY + 2.f*m_dpiScale, x + w - 80*m_dpiScale, y + itemH - padY);
-        rt->DrawTextW(item.text.c_str(),
-            (UINT32)std::min((size_t)140, item.text.size()),
-            m_tfMain, tr, m_brush);
-    }
+    // Left controls zone (Delete icon and Repetition badge)
+    float delSize = 28.f * m_dpiScale;
+    float delLeft = x + (isRtl ? (32.f * m_dpiScale) : (16.f * m_dpiScale));
+    float delTop  = y + (itemH - delSize) / 2.f;
+    D2D1_RECT_F delR = D2D1::RectF(delLeft, delTop, delLeft + delSize, delTop + delSize);
 
     // Repetition Badge
-    if (m_tfCat && item.priority > 0) {
-        std::wstring repStr = L"×" + std::to_wstring(item.priority);
+    float repW = 0.f;
+    if (m_tfCat && item.repetitions > 1) {
+        std::wstring repStr = L"×" + std::to_wstring(item.repetitions);
         float rw = 32.f * m_dpiScale;
         float rh = 20.f * m_dpiScale;
-        float rxP = isRtl ? (x + padX) : (x + w - padX - rw);
+        float rxP = delLeft + delSize + 8.f * m_dpiScale;
         float ryP = y + (itemH - rh) / 2.f;
-
         D2D1_RECT_F repR = D2D1::RectF(rxP, ryP, rxP + rw, ryP + rh);
         m_brush->SetColor(ds::Rgba(0x1B, 0x27, 0x1C));
         rt->FillRoundedRectangle(D2D1::RoundedRect(repR, 4.f*m_dpiScale, 4.f*m_dpiScale), m_brush);
         m_brush->SetColor(ds::Accent::Primary(0.7f));
         rt->DrawTextW(repStr.c_str(), (UINT32)repStr.size(), m_tfCat, repR, m_brush);
+        repW = rw + 8.f * m_dpiScale;
     }
-    
-    // Delete icon (red X on hover)
-    if (hovered && m_tfCat) {
-        m_brush->SetColor(D2D1::ColorF(1.f, 0.4f, 0.4f, 0.9f));
-        float delX = isRtl ? (x + 44*m_dpiScale) : (x + w - 74.f*m_dpiScale);
-        rt->DrawTextW(L"✕", 1, m_tfCat, D2D1::RectF(delX, y + padY, delX + 24*m_dpiScale, y + itemH - padY), m_brush);
+
+    // Delete icon button (Fluent Trash Can in polished circular badge on far left)
+    if (hovered && m_tfIconSmall) {
+        float radius = delSize / 2.f;
+        bool isHoverDel = m_hoveredDelBtn && (m_hoveredItem == (int)index);
+        if (isHoverDel) {
+            m_brush->SetColor(ds::Rgba(0xDC, 0x26, 0x26, 0.25f)); // Soft crimson hover glow
+            rt->FillRoundedRectangle(D2D1::RoundedRect(delR, radius, radius), m_brush);
+            m_brush->SetColor(ds::Rgba(0xEF, 0x44, 0x44, 0.70f)); // Red border
+            rt->DrawRoundedRectangle(D2D1::RoundedRect(delR, radius, radius), m_brush, 1.f);
+            m_brush->SetColor(ds::Rgba(0xFF, 0xFF, 0xFF, 1.0f)); // Pure white trash icon
+        } else {
+            m_brush->SetColor(ds::Rgba(0x18, 0x22, 0x1A, 0.85f)); // Dark subtle surface
+            rt->FillRoundedRectangle(D2D1::RoundedRect(delR, radius, radius), m_brush);
+            m_brush->SetColor(ds::Border());
+            rt->DrawRoundedRectangle(D2D1::RoundedRect(delR, radius, radius), m_brush, 0.75f);
+            m_brush->SetColor(ds::TextSecondary()); // Muted icon
+        }
+        rt->DrawTextW(L"\xE74D", 1, m_tfIconSmall, delR, m_brush);
+    }
+
+    // Main text (Arabic, RTL) - well clear of left controls
+    if (m_tfMain && !item.text.empty()) {
+        m_brush->SetColor(item.enabled ? ds::TextPrimary() : ds::TextMuted());
+        float textLeft = delLeft + delSize + repW + 14.f * m_dpiScale;
+        float textRight = x + w - (isRtl ? (32.f * m_dpiScale) : (20.f * m_dpiScale));
+        D2D1_RECT_F tr = D2D1::RectF(textLeft, y + padY + 2.f * m_dpiScale, textRight, y + itemH - padY);
+        rt->DrawTextW(item.text.c_str(),
+            (UINT32)std::min((size_t)140, item.text.size()),
+            m_tfMain, tr, m_brush);
     }
 
     y += itemH + ds::Space::S * m_dpiScale;
@@ -275,6 +307,31 @@ void LibraryPage::DrawAddModal(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds)
     }
 }
 
+static std::vector<size_t> GetFilteredIndices(int filter) {
+    auto& allItems = ContentEngine::Instance().GetAllItems();
+    std::vector<size_t> filtered;
+    filtered.reserve(allItems.size());
+    for (size_t i = 0; i < allItems.size(); ++i) {
+        auto& it = allItems[i];
+        if (filter == 0) {
+            filtered.push_back(i);
+        } else if (filter == 1 && (it.category.find("morning") != std::string::npos || it.category.find("صباح") != std::string::npos)) {
+            filtered.push_back(i);
+        } else if (filter == 2 && (it.category.find("evening") != std::string::npos || it.category.find("مساء") != std::string::npos)) {
+            filtered.push_back(i);
+        } else if (filter == 3 && (it.category.find("morning") == std::string::npos &&
+                                   it.category.find("evening") == std::string::npos &&
+                                   it.category.find("صباح") == std::string::npos &&
+                                   it.category.find("مساء") == std::string::npos &&
+                                   it.id.rfind("custom_", 0) != 0)) {
+            filtered.push_back(i);
+        } else if (filter == 4 && (it.id.rfind("custom_", 0) == 0)) {
+            filtered.push_back(i);
+        }
+    }
+    return filtered;
+}
+
 void LibraryPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
     if (!m_brush) rt->CreateSolidColorBrush(D2D1::ColorF(1,1,1), &m_brush);
 
@@ -319,30 +376,34 @@ void LibraryPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
     }
 
     // 1. + Add Dhikr Button
-    m_brush->SetColor(m_hoveredBtn == 2 ? ds::Accent::Dark() : ds::Accent::Primary());
+    auto addCol = m_hoveredBtn == 2 ? ds::Accent::Dark() : ds::Accent::Primary();
+    m_brush->SetColor(addCol);
     rt->FillRoundedRectangle(D2D1::RoundedRect(addRect, rx, rx), m_brush);
     if (m_tfCat) {
-        m_brush->SetColor(ds::Rgba(0x08, 0x0A, 0x09));
+        float lum = 0.299f * addCol.r + 0.587f * addCol.g + 0.114f * addCol.b;
+        m_brush->SetColor(lum >= 0.58f ? ds::Rgba(0x08, 0x0A, 0x09) : ds::Rgba(0xFF, 0xFF, 0xFF));
         std::wstring addStr = Localization::Instance().Get(L"library.add_dhikr");
         rt->DrawTextW(addStr.c_str(), (UINT32)addStr.size(), m_tfCat, addRect, m_brush);
     }
 
     // 2. Import MD Button
-    m_brush->SetColor(m_hoveredBtn == 0 ? ds::CardHover() : ds::Surface());
+    m_brush->SetColor(m_hoveredBtn == 0 ? ds::Rgba(0x22, 0x2C, 0x24) : ds::Surface());
     rt->FillRoundedRectangle(D2D1::RoundedRect(importRect, rx, rx), m_brush);
-    m_brush->SetColor(ds::Border());
-    rt->DrawRoundedRectangle(D2D1::RoundedRect(importRect, rx, rx), m_brush, 0.75f);
+    m_brush->SetColor(m_hoveredBtn == 0 ? ds::Accent::Primary() : ds::Rgba(0x4A, 0x58, 0x4E, 1.0f));
+    rt->DrawRoundedRectangle(D2D1::RoundedRect(importRect, rx, rx), m_brush, 1.2f);
     if (m_tfCat) {
-        m_brush->SetColor(ds::TextPrimary());
+        m_brush->SetColor(ds::Rgba(0xFF, 0xFF, 0xFF, 1.0f));
         std::wstring impStr = Localization::Instance().Get(L"library.import_md");
         rt->DrawTextW(impStr.c_str(), (UINT32)impStr.size(), m_tfCat, importRect, m_brush);
     }
 
-    // 3. Delete All Button
+    // 3. Delete All Button (Refined dark crimson outline)
     m_brush->SetColor(m_hoveredBtn == 1 ? ds::BtnDangerHover() : ds::BtnDanger());
     rt->FillRoundedRectangle(D2D1::RoundedRect(delRect, rx, rx), m_brush);
+    m_brush->SetColor(ds::BtnDangerBorder());
+    rt->DrawRoundedRectangle(D2D1::RoundedRect(delRect, rx, rx), m_brush, 1.0f);
     if (m_tfCat) {
-        m_brush->SetColor(ds::Rgba(0xFF, 0xFF, 0xFF));
+        m_brush->SetColor(ds::BtnDangerText());
         std::wstring delStr = Localization::Instance().Get(L"library.delete_all");
         rt->DrawTextW(delStr.c_str(), (UINT32)delStr.size(), m_tfCat, delRect, m_brush);
     }
@@ -355,19 +416,7 @@ void LibraryPage::Draw(ID2D1RenderTarget* rt, const D2D1_RECT_F& bounds) {
 
     // Filter items based on m_currentFilter
     auto& allItems = ContentEngine::Instance().GetAllItems();
-    std::vector<size_t> filteredIndices;
-    for (size_t i = 0; i < allItems.size(); ++i) {
-        auto& it = allItems[i];
-        if (m_currentFilter == 0) {
-            filteredIndices.push_back(i);
-        } else if (m_currentFilter == 1 && (it.category.find("morning") != std::string::npos || it.category.find("evening") != std::string::npos)) {
-            filteredIndices.push_back(i);
-        } else if (m_currentFilter == 2 && (it.category.find("tasbih") != std::string::npos || it.category.find("tasbeeh") != std::string::npos)) {
-            filteredIndices.push_back(i);
-        } else if (m_currentFilter == 3 && (it.id.rfind("custom_", 0) == 0)) {
-            filteredIndices.push_back(i);
-        }
-    }
+    std::vector<size_t> filteredIndices = GetFilteredIndices(m_currentFilter);
 
     if (allItems.empty()) {
         DrawEmptyState(rt, D2D1::RectF(x, y, x+w, bounds.bottom - bounds.top));
@@ -430,14 +479,30 @@ bool LibraryPage::OnKeyDown(WPARAM key) {
     if (key == VK_ESCAPE) {
         m_showAddModal = false;
         m_inputDhikrText.clear();
+        MainWindow::Instance().Invalidate();
         return true;
+    } else if (key == 'V' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        if (OpenClipboard(nullptr)) {
+            HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+            if (hData) {
+                wchar_t* pszText = static_cast<wchar_t*>(GlobalLock(hData));
+                if (pszText) {
+                    m_inputDhikrText += pszText;
+                    GlobalUnlock(hData);
+                }
+            }
+            CloseClipboard();
+            MainWindow::Instance().Invalidate();
+            return true;
+        }
     } else if (key == VK_RETURN) {
         if (!m_inputDhikrText.empty()) {
             ContentItem newItem;
             newItem.id = "custom_" + std::to_string(time(nullptr));
             newItem.text = m_inputDhikrText;
             newItem.category = "custom";
-            newItem.priority = m_selectedReps;
+            newItem.priority = 1;
+            newItem.repetitions = m_selectedReps;
             newItem.enabled = true;
             ContentEngine::Instance().AddItem(newItem);
             m_inputDhikrText.clear();
@@ -483,7 +548,8 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
                 newItem.id = "custom_" + std::to_string(time(nullptr));
                 newItem.text = m_inputDhikrText;
                 newItem.category = "custom";
-                newItem.priority = m_selectedReps;
+                newItem.priority = 1;
+                newItem.repetitions = m_selectedReps;
                 newItem.enabled = true;
                 ContentEngine::Instance().AddItem(newItem);
                 m_inputDhikrText.clear();
@@ -535,11 +601,12 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
     float curX = isRtl ? (m_contentX + m_contentW) : m_contentX;
     std::wstring filterStrings[] = {
         Localization::Instance().Get(L"library.filter_all"),
-        Localization::Instance().Get(L"library.filter_morning_evening"),
-        Localization::Instance().Get(L"library.filter_tasbih"),
+        Localization::Instance().Get(L"library.filter_morning"),
+        Localization::Instance().Get(L"library.filter_evening"),
+        Localization::Instance().Get(L"library.filter_daily"),
         Localization::Instance().Get(L"library.filter_custom")
     };
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         float pillW = (filterStrings[i].size() * 8.5f + 24.f) * m_dpiScale;
         float px = isRtl ? (curX - pillW) : curX;
         if (x >= px && x <= px + pillW && y >= filterY && y <= filterY + 26.f * m_dpiScale) {
@@ -574,7 +641,7 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
         ofn.hwndOwner = Application::Instance().MainWindow();
         ofn.lpstrFile = szFile;
         ofn.nMaxFile = sizeof(szFile) / sizeof(wchar_t);
-        ofn.lpstrFilter = L"Markdown Files (*.md)\0*.md\0All Files (*.*)\0*.*\0";
+        ofn.lpstrFilter = L"All Supported Datasets (*.json;*.md;*.txt)\0*.json;*.md;*.txt\0JSON Datasets (*.json)\0*.json\0Markdown Files (*.md)\0*.md\0All Files (*.*)\0*.*\0";
         ofn.nFilterIndex = 1;
         ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
         
@@ -599,12 +666,16 @@ bool LibraryPage::OnLButtonDown(int x, int y) {
     if (m_hoveredItem >= 0) {
         auto& items = ContentEngine::Instance().GetItemsMutable();
         if (m_hoveredItem < (int)items.size()) {
-            bool clickDel = isRtl ? (x <= m_contentX + 50.f*m_dpiScale)
-                                  : (x >= m_contentX + m_contentW - 50.f*m_dpiScale);
-            if (clickDel) {
-                items.erase(items.begin() + m_hoveredItem);
-                ContentEngine::Instance().Save();
-                m_hoveredItem = -1;
+            if (m_hoveredDelBtn) {
+                std::wstring title = Localization::Instance().Get(L"library.delete_title");
+                std::wstring msg   = Localization::Instance().Get(L"library.delete_item_confirm");
+                int r = MessageBoxW(Application::Instance().MainWindow(), msg.c_str(), title.c_str(), MB_YESNO | MB_ICONQUESTION);
+                if (r == IDYES) {
+                    items.erase(items.begin() + m_hoveredItem);
+                    ContentEngine::Instance().Save();
+                    m_hoveredItem = -1;
+                    m_hoveredDelBtn = false;
+                }
             } else {
                 items[m_hoveredItem].enabled = !items[m_hoveredItem].enabled;
                 ContentEngine::Instance().Save();
@@ -624,7 +695,8 @@ bool LibraryPage::OnMouseWheel(int delta) {
     if (m_scrollY < 0) m_scrollY = 0;
     
     float itemH = 74.f * m_dpiScale + ds::Space::S * m_dpiScale;
-    float totalH = ContentEngine::Instance().GetAllItems().size() * itemH;
+    auto filtered = GetFilteredIndices(m_currentFilter);
+    float totalH = filtered.size() * itemH;
     float viewH = 600.f * m_dpiScale;
     
     float maxScroll = std::max(0.f, totalH - viewH + 200.f*m_dpiScale);
@@ -667,16 +739,32 @@ bool LibraryPage::OnMouseMove(int x, int y) {
     m_hoveredBtn = newHoveredBtn;
     
     float itemH = 74.f * m_dpiScale + ds::Space::S * m_dpiScale;
+    float cardH = 74.f * m_dpiScale;
     float listTop = m_contentY + 44.f * m_dpiScale + 38.f * m_dpiScale + 26.f * m_dpiScale;
     
     int oldHoverItem = m_hoveredItem;
+    bool oldHoverDelBtn = m_hoveredDelBtn;
+    m_hoveredDelBtn = false;
+
     if (x >= m_contentX && x <= m_contentX + m_contentW && y >= listTop) {
         float relY = (y - listTop) + m_scrollY;
         int idx = (int)(relY / itemH);
+        float cardRelY = relY - idx * itemH;
         
-        auto& items = ContentEngine::Instance().GetAllItems();
-        if (idx >= 0 && idx < (int)items.size()) {
-            m_hoveredItem = idx;
+        std::vector<size_t> filtered = GetFilteredIndices(m_currentFilter);
+        if (idx >= 0 && idx < (int)filtered.size() && cardRelY <= cardH) {
+            m_hoveredItem = (int)filtered[idx];
+
+            float delSize = 28.f * m_dpiScale;
+            float delLeft = m_contentX + (isRtl ? (32.f * m_dpiScale) : (16.f * m_dpiScale));
+            float delTop = (listTop - m_scrollY + idx * itemH) + (cardH - delSize) / 2.f;
+            float delRight = delLeft + delSize;
+            float delBottom = delTop + delSize;
+
+            if (x >= delLeft - 4.f*m_dpiScale && x <= delRight + 4.f*m_dpiScale &&
+                y >= delTop - 4.f*m_dpiScale && y <= delBottom + 4.f*m_dpiScale) {
+                m_hoveredDelBtn = true;
+            }
         } else {
             m_hoveredItem = -1;
         }
@@ -684,12 +772,13 @@ bool LibraryPage::OnMouseMove(int x, int y) {
         m_hoveredItem = -1;
     }
 
-    return (m_hoveredBtn != oldHoverBtn || m_hoveredItem != oldHoverItem);
+    return (m_hoveredBtn != oldHoverBtn || m_hoveredItem != oldHoverItem || m_hoveredDelBtn != oldHoverDelBtn);
 }
 
 void LibraryPage::OnMouseLeave() { 
     m_hoveredItem = -1; 
     m_hoveredBtn = -1; 
+    m_hoveredDelBtn = false;
 }
 
 bool LibraryPage::HitTestInteractive(int x, int y) {

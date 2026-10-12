@@ -1,11 +1,15 @@
 #include "Settings.h"
 #include "Logger.h"
 #include "../third_party/json.hpp"
-#include <shlobj.h>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <filesystem>
+#include <random>
+#ifdef _WIN32
+#include <windows.h>
 #include <objbase.h>
+#endif
 
 using json = nlohmann::json;
 
@@ -14,18 +18,57 @@ namespace dhikr {
 // Helper: UTF-8 <-> UTF-16
 static std::string WideToUtf8(const std::wstring& wstr) {
     if (wstr.empty()) return "";
+#ifdef _WIN32
     int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string result(size - 1, 0);
     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, result.data(), size, nullptr, nullptr);
     return result;
+#else
+    std::string result;
+    for (wchar_t wc : wstr) {
+        if (wc < 0x80) {
+            result.push_back((char)wc);
+        } else if (wc < 0x800) {
+            result.push_back((char)(0xC0 | (wc >> 6)));
+            result.push_back((char)(0x80 | (wc & 0x3F)));
+        } else {
+            result.push_back((char)(0xE0 | (wc >> 12)));
+            result.push_back((char)(0x80 | ((wc >> 6) & 0x3F)));
+            result.push_back((char)(0x80 | (wc & 0x3F)));
+        }
+    }
+    return result;
+#endif
 }
 
 static std::wstring Utf8ToWide(const std::string& str) {
     if (str.empty()) return L"";
+#ifdef _WIN32
     int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
     std::wstring result(size - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, result.data(), size);
     return result;
+#else
+    std::wstring result;
+    for (size_t i = 0; i < str.size();) {
+        unsigned char c = (unsigned char)str[i];
+        if (c < 0x80) {
+            result.push_back((wchar_t)c);
+            i += 1;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < str.size()) {
+            wchar_t wc = ((c & 0x1F) << 6) | (str[i + 1] & 0x3F);
+            result.push_back(wc);
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < str.size()) {
+            wchar_t wc = ((c & 0x0F) << 12) | ((str[i + 1] & 0x3F) << 6) | (str[i + 2] & 0x3F);
+            result.push_back(wc);
+            i += 3;
+        } else {
+            i += 1; // skip malformed
+        }
+    }
+    return result;
+#endif
 }
 
 Settings& Settings::Instance() {
@@ -56,16 +99,32 @@ static Color HexToColor(const std::string& hex) {
 
 // ── UUID generator for anonymous installation ID ──────────────────────────────
 static std::wstring GenerateUUID() {
+#ifdef _WIN32
     GUID guid;
     CoCreateGuid(&guid);
     wchar_t buf[64];
     StringFromGUID2(guid, buf, 64);
     return buf;
+#else
+    static std::random_device rd;
+    static std::mt19937_64 gen(rd());
+    static std::uniform_int_distribution<uint64_t> dis;
+    uint64_t part1 = dis(gen);
+    uint64_t part2 = dis(gen);
+    wchar_t buf[64];
+    swprintf(buf, 64, L"%08llx-%04llx-%04llx-%04llx-%012llx",
+        (unsigned long long)(part1 >> 32),
+        (unsigned long long)((part1 >> 16) & 0xFFFF),
+        (unsigned long long)((part1 & 0x0FFF) | 0x4000),
+        (unsigned long long)(((part2 >> 48) & 0x3FFF) | 0x8000),
+        (unsigned long long)(part2 & 0xFFFFFFFFFFFFULL));
+    return buf;
+#endif
 }
 
-bool Settings::Load(const std::wstring& appDataPath) {
+bool Settings::Load(const std::filesystem::path& appDataPath) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_filePath = appDataPath + L"\\settings.json";
+    m_filePath = appDataPath / "settings.json";
 
     // Generate installation ID if needed
     if (m_settings.installationId.empty()) {
@@ -87,6 +146,7 @@ bool Settings::Load(const std::wstring& appDataPath) {
         if (j.contains("language"))        s.language = Utf8ToWide(j["language"].get<std::string>());
         if (j.contains("startWithWindows")) s.startWithWindows = j["startWithWindows"].get<bool>();
         if (j.contains("theme"))           s.theme = Utf8ToWide(j["theme"].get<std::string>());
+        if (j.contains("colorTheme"))      s.colorTheme = (ColorTheme)std::clamp(j["colorTheme"].get<int>(), 0, 5);
         if (j.contains("accentColor"))     s.accentColor = HexToColor(j["accentColor"].get<std::string>());
         if (j.contains("installationId")) {
             s.installationId = Utf8ToWide(j["installationId"].get<std::string>());
@@ -123,15 +183,27 @@ bool Settings::Load(const std::wstring& appDataPath) {
             }
         }
 
-        // Popup
+        // Popup Appearance & Display
         if (j.contains("popupPosition"))    s.popupPosition = (PopupPosition)j["popupPosition"].get<int>();
         if (j.contains("popupMonitor"))     s.popupMonitor = (PopupMonitor)j["popupMonitor"].get<int>();
         if (j.contains("specificMonitor"))  s.specificMonitor = j["specificMonitor"].get<int>();
         if (j.contains("popupDurationSec")) s.popupDurationSec = j["popupDurationSec"].get<int>();
         if (j.contains("animationEnabled")) s.animationEnabled = j["animationEnabled"].get<bool>();
+        if (j.contains("popupAnimation"))   s.popupAnimation = (PopupAnimation)std::clamp(j["popupAnimation"].get<int>(), 0, 7);
+        if (j.contains("animationSpeed"))   s.animationSpeed = (AnimationSpeed)std::clamp(j["animationSpeed"].get<int>(), 0, 2);
+        if (j.contains("popupSurface"))     s.popupSurface = (PopupSurfaceStyle)std::clamp(j["popupSurface"].get<int>(), 0, 2);
+        if (j.contains("popupCorner"))      s.popupCorner = (PopupCornerStyle)std::clamp(j["popupCorner"].get<int>(), 0, 2);
+        if (j.contains("arabesqueOverlay")) s.arabesqueOverlay = j["arabesqueOverlay"].get<bool>();
+
+        // Typography & Content
+        if (j.contains("popupFontSize"))    s.popupFontSize = (PopupFontSize)std::clamp(j["popupFontSize"].get<int>(), 0, 2);
+        if (j.contains("showTashkeel"))     s.showTashkeel = j["showTashkeel"].get<bool>();
+        if (j.contains("showCounterPill"))  s.showCounterPill = j["showCounterPill"].get<bool>();
+        if (j.contains("showSource"))       s.showSource = j["showSource"].get<bool>();
 
         // Sound
         if (j.contains("soundEnabled"))    s.soundEnabled = j["soundEnabled"].get<bool>();
+        if (j.contains("soundPreset"))     s.soundPreset = (SoundPreset)std::clamp(j["soundPreset"].get<int>(), 0, 4);
         if (j.contains("soundVolume"))     s.soundVolume = std::clamp(j["soundVolume"].get<int>(), 0, 100);
         if (j.contains("customSoundPath")) s.customSoundPath = Utf8ToWide(j["customSoundPath"].get<std::string>());
 
@@ -166,6 +238,7 @@ bool Settings::Save() {
         j["language"]        = WideToUtf8(s.language);
         j["startWithWindows"] = s.startWithWindows;
         j["theme"]           = "dark";
+        j["colorTheme"]      = (int)s.colorTheme;
         j["accentColor"]     = ColorToHex(s.accentColor);
         j["installationId"]  = WideToUtf8(s.installationId);
 
@@ -199,15 +272,27 @@ bool Settings::Save() {
         }
         j["quietPeriods"] = qpArr;
 
-        // Popup
+        // Popup Appearance & Display
         j["popupPosition"]    = (int)s.popupPosition;
         j["popupMonitor"]     = (int)s.popupMonitor;
         j["specificMonitor"]  = s.specificMonitor;
         j["popupDurationSec"] = s.popupDurationSec;
         j["animationEnabled"] = s.animationEnabled;
+        j["popupAnimation"]   = (int)s.popupAnimation;
+        j["animationSpeed"]   = (int)s.animationSpeed;
+        j["popupSurface"]     = (int)s.popupSurface;
+        j["popupCorner"]      = (int)s.popupCorner;
+        j["arabesqueOverlay"] = s.arabesqueOverlay;
+
+        // Typography & Content
+        j["popupFontSize"]    = (int)s.popupFontSize;
+        j["showTashkeel"]     = s.showTashkeel;
+        j["showCounterPill"]  = s.showCounterPill;
+        j["showSource"]       = s.showSource;
 
         // Sound
         j["soundEnabled"]    = s.soundEnabled;
+        j["soundPreset"]     = (int)s.soundPreset;
         j["soundVolume"]     = s.soundVolume;
         j["customSoundPath"] = WideToUtf8(s.customSoundPath);
 
@@ -222,7 +307,8 @@ bool Settings::Save() {
         j["pauseUntilUnix"] = s.pauseUntilUnix;
 
         // Atomic write: write to temp file then rename
-        std::wstring tmpPath = m_filePath + L".tmp";
+        auto tmpPath = m_filePath;
+        tmpPath += ".tmp";
         {
             std::ofstream f(tmpPath);
             if (!f.is_open()) {
@@ -234,15 +320,17 @@ bool Settings::Save() {
             f.flush();
             if (f.fail()) {
                 LOG_ERROR("Failed to write settings to temp file");
-                DeleteFileW(tmpPath.c_str());
+                std::error_code ec;
+                std::filesystem::remove(tmpPath, ec);
                 return false;
             }
         }
         // Atomic replace
-        if (!MoveFileExW(tmpPath.c_str(), m_filePath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-            LOG_ERROR("Failed to atomically replace settings file");
-            DeleteFileW(tmpPath.c_str());
-            return false;
+        std::error_code ec;
+        std::filesystem::rename(tmpPath, m_filePath, ec);
+        if (ec) {
+            std::filesystem::copy_file(tmpPath, m_filePath, std::filesystem::copy_options::overwrite_existing, ec);
+            std::filesystem::remove(tmpPath, ec);
         }
 
         LOG_INFO("Settings saved");

@@ -1,11 +1,19 @@
 #pragma once
-#include <windows.h>
 #include <functional>
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
+#include <chrono>
 #include <ctime>
 #include "Settings.h"
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace dhikr {
 
@@ -19,14 +27,22 @@ enum class ScheduleState {
 };
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
-// Event-driven: uses a background thread that sleeps via WaitForSingleObject
-// on a kernel waitable timer. No polling loop.
+// Cross-platform event-driven scheduler: uses a background thread that sleeps via
+// std::condition_variable on standard C++20 clocks. Zero polling.
 class Scheduler {
 public:
     static Scheduler& Instance();
 
-    // hwnd receives WM_REMINDER_TRIGGER when it's time for a reminder
+    using TriggerCallback = std::function<void()>;
+
+    // Start scheduler with callback (cross-platform)
+    void Start(TriggerCallback onTrigger);
+
+#ifdef _WIN32
+    // Windows overload: posts WM_REMINDER_TRIGGER to hwnd
     void Start(HWND hwnd);
+#endif
+
     void Stop();
 
     // Recalculate next reminder immediately (call after settings change)
@@ -45,7 +61,7 @@ public:
     ScheduleState GetState() const;
     time_t        GetNextReminderTime() const;
 
-    // Called from main window on WM_POWERBROADCAST PBT_APMRESUMEAUTOMATIC
+    // Called on system wake from sleep/suspend
     void OnSystemWake();
 
     Scheduler(const Scheduler&) = delete;
@@ -69,18 +85,21 @@ private:
     // Returns start of next window for a given day
     time_t NextWindowStart(const struct tm& lt, int daysAhead = 0) const;
 
-    HWND            m_hwnd       = nullptr;
-    HANDLE          m_timerHandle = INVALID_HANDLE_VALUE;
-    HANDLE          m_stopEvent   = INVALID_HANDLE_VALUE;
-    HANDLE          m_recalcEvent = INVALID_HANDLE_VALUE;
-    std::thread     m_thread;
-    std::atomic<bool> m_running   { false };
+    TriggerCallback         m_onTrigger;
+#ifdef _WIN32
+    HWND                    m_hwnd            = nullptr;
+#endif
+    std::thread             m_thread;
+    std::atomic<bool>       m_running         { false };
+    bool                    m_recalcRequested = false;
 
-    mutable std::mutex m_mutex;
-    time_t          m_nextFire    = 0;
-    ScheduleState   m_state       = ScheduleState::Disabled;
+    mutable std::mutex      m_mutex;
+    std::condition_variable m_cv;
+    time_t                  m_nextFire        = 0;
+    ScheduleState           m_state           = ScheduleState::Disabled;
 
-    time_t          m_pauseUntil  = 0; // 0 = not paused
+    time_t                  m_pauseUntil      = 0; // 0 = not paused
+    std::atomic<time_t>     m_lastFiredTime   { 0 };
 };
 
 } // namespace dhikr

@@ -1,10 +1,17 @@
 #pragma once
-#include <windows.h>
 #include <string>
 #include <vector>
 #include <deque>
 #include <mutex>
 #include <functional>
+#include <filesystem>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace dhikr {
 
@@ -17,6 +24,7 @@ struct ContentItem {
     std::wstring description;     // Short description / meaning
     std::wstring source;          // Reference source
     int          priority = 1;    // 1 (high) to 5 (low)
+    int          repetitions = 1; // Recitation count (1, 3, 33, 100)
     bool         enabled  = true;
 };
 
@@ -35,17 +43,19 @@ public:
     static ContentEngine& Instance();
 
     // Load content from JSON file; validates before replacing current content
-    ContentLoadResult Load(const std::wstring& contentFilePath);
+    ContentLoadResult Load(const std::filesystem::path& contentFilePath);
 
     // Load content from embedded markdown resource
     ContentLoadResult LoadFromResource();
+#ifdef _WIN32
     ContentLoadResult LoadFromMarkdownResource(HINSTANCE hInstance, int resourceId);
+#endif
 
     // Load content from markdown string in memory
     ContentLoadResult LoadFromMarkdownString(const std::string& markdownText);
 
     // Load content from external markdown file
-    ContentLoadResult LoadFromMarkdownFile(const std::wstring& filePath);
+    ContentLoadResult LoadFromMarkdownFile(const std::filesystem::path& filePath);
 
     // Reload from the same path used in Load()
     ContentLoadResult Reload();
@@ -76,7 +86,7 @@ public:
     void Save();
 
     // Set the canonical AppData save path (called once at startup)
-    void SetSavePath(const std::wstring& path) { m_savePath = path; }
+    void SetSavePath(const std::filesystem::path& path) { m_savePath = path; }
 
     // Last load error description
     std::wstring LastError() const { return m_lastError; }
@@ -87,7 +97,7 @@ public:
 private:
     ContentEngine() = default;
 
-    ContentLoadResult ParseAndValidate(const std::wstring& filePath,
+    ContentLoadResult ParseAndValidate(const std::filesystem::path& filePath,
                                        std::vector<ContentItem>& out,
                                        std::wstring& errorOut);
 
@@ -97,8 +107,8 @@ private:
     std::vector<ContentItem>   m_items;
     const ContentItem*         m_current = nullptr;
     std::deque<std::string>    m_recentIds; // last N shown IDs
-    std::wstring               m_lastFilePath;  // source path used for loading
-    std::wstring               m_savePath;      // AppData path to persist content
+    std::filesystem::path      m_lastFilePath;  // source path used for loading
+    std::filesystem::path      m_savePath;      // AppData path to persist content
     std::wstring               m_lastError;
 
     static constexpr size_t kHistoryWindow = 20; // avoid repeating last 20 items

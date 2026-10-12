@@ -13,18 +13,14 @@ public:
         m_labels = {
             L"Home",
             L"Reminders",
-            L"Schedule",
             L"Dhikr Library",
-            L"Statistics",
             L"Settings",
             L"About"
         };
         m_icons = {
             ds::Icon::Home,
             ds::Icon::Reminders,
-            ds::Icon::Schedule,
             ds::Icon::Library,
-            ds::Icon::Statistics,
             ds::Icon::Settings,
             ds::Icon::About
         };

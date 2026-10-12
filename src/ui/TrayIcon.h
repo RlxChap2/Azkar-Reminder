@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
+#include "../core/Settings.h"
 
 namespace dhikr {
 
@@ -28,7 +29,7 @@ public:
     void SetPaused(bool paused);
 
     // Update dynamic accent color icon
-    void UpdateIcon();
+    void UpdateIcon(ColorTheme themeOverride = static_cast<ColorTheme>(-1));
 
     TrayIcon(const TrayIcon&) = delete;
     TrayIcon& operator=(const TrayIcon&) = delete;

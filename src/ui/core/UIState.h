@@ -9,11 +9,9 @@ namespace dhikr {
 enum class PageId {
     Home = 0,
     Reminders = 1,
-    Schedule = 2,
-    Library = 3,
-    Statistics = 4,
-    Settings = 5,
-    About = 6
+    Library = 2,
+    Settings = 3,
+    About = 4
 };
 
 // Centralized state model for the UI thread.

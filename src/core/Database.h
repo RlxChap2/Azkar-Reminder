@@ -1,7 +1,8 @@
 #pragma once
-#include <windows.h>
 #include <string>
+#include <vector>
 #include <functional>
+#include <filesystem>
 #include "../third_party/sqlite3.h"
 
 namespace dhikr {
@@ -29,7 +30,7 @@ class Database {
 public:
     static Database& Instance();
 
-    bool Open(const std::wstring& dbPath);
+    bool Open(const std::filesystem::path& dbPath);
     void Close();
 
     // Reminder history
@@ -47,6 +48,7 @@ public:
     std::vector<DailyStat>     GetDailyStats(int days = 30);
     std::vector<ReminderEvent> GetRecentEvents(int limit = 100);
     std::vector<std::string>   GetRecentContentIds(int limit = 50);
+    std::vector<std::pair<std::string, int>> GetTopDhikrs(int limit = 5);
 
     // Maintenance
     bool Vacuum();

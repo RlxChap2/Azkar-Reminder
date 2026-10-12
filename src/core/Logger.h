@@ -1,5 +1,4 @@
 #pragma once
-#include <windows.h>
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -16,7 +15,7 @@ class Logger {
 public:
     static Logger& Instance();
 
-    void Initialize(const std::wstring& logDirectory);
+    void Initialize(const std::filesystem::path& logDirectory);
     void Log(LogLevel level, const std::string& message);
     void Info(const std::string& msg)    { Log(LogLevel::Info,    msg); }
     void Warn(const std::string& msg)    { Log(LogLevel::Warning, msg); }
@@ -34,9 +33,9 @@ private:
     std::string CurrentTimestamp();
     std::string LevelString(LogLevel level);
 
-    std::mutex       m_mutex;
-    std::ofstream    m_file;
-    std::wstring     m_logDir;
+    std::mutex            m_mutex;
+    std::ofstream         m_file;
+    std::filesystem::path m_logDir;
     size_t           m_currentSize = 0;
     int              m_fileIndex = 0;
     static constexpr size_t kMaxFileSize = 1 * 1024 * 1024; // 1 MB

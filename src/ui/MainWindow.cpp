@@ -4,11 +4,10 @@
 #include "PopupWindow.h"
 #include "core/LogoRenderer.h"
 #include "core/ResourceLoader.h"
+#include "core/WindowChrome.h"
 #include "pages/HomePage.h"
 #include "pages/RemindersPage.h"
-#include "pages/SchedulePage.h"
 #include "pages/LibraryPage.h"
-#include "pages/StatisticsPage.h"
 #include "pages/SettingsPage.h"
 #include "pages/AboutPage.h"
 #include "../core/Application.h"
@@ -38,8 +37,8 @@ namespace dhikr {
 
 static std::wstring GetNavLabel(int i) {
     const wchar_t* keys[] = {
-        L"nav.home", L"nav.reminders", L"nav.schedule", L"nav.library",
-        L"nav.statistics", L"nav.settings", L"nav.about"
+        L"nav.home", L"nav.reminders", L"nav.library",
+        L"nav.settings", L"nav.about"
     };
     return Localization::Instance().Get(keys[i]);
 }
@@ -61,11 +60,13 @@ bool MainWindow::Create(HINSTANCE hInstance) {
 
     m_width  = (int)(820.f * m_dpiScale);
     m_height = (int)(560.f * m_dpiScale);
-
     RegisterClass(hInstance);
     if (!CreateWindow_(hInstance)) return false;
+
     if (!InitD2D()) return false;
+
     InitTextFormats();
+
     InitPages(hInstance);
 
     // Create popup window
@@ -73,6 +74,8 @@ bool MainWindow::Create(HINSTANCE hInstance) {
 
     // Request initial data update
     PostMessageW(m_hwnd, WM_APP + 100, 0, 0);
+
+    UpdateAppIcon();
 
     LOG_INFO("Main window created");
     return true;
@@ -87,11 +90,26 @@ void MainWindow::RegisterClass(HINSTANCE hInstance) {
     wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
 
-    // Load icon resources; fall back to the system default app icon
-    // if the .ico files were not embedded (e.g. setup_deps.bat failed).
-    wc.hIcon   = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    int bigResId = IDI_APP_ICON;
+    int smallResId = IDI_APP_ICON_SMALL;
+    if (ds::Accent::IsAppPaused()) {
+        bigResId = IDI_APP_DORMANT_ICON;
+        smallResId = IDI_APP_DORMANT_SMALL;
+    } else {
+        switch (Settings::Instance().Get().colorTheme) {
+            case ColorTheme::Yellow: bigResId = IDI_APP_YELLOW_ICON; smallResId = IDI_APP_YELLOW_SMALL; break;
+            case ColorTheme::Blue:   bigResId = IDI_APP_BLUE_ICON;   smallResId = IDI_APP_BLUE_SMALL;   break;
+            case ColorTheme::Red:    bigResId = IDI_APP_RED_ICON;    smallResId = IDI_APP_RED_SMALL;    break;
+            case ColorTheme::Silver: bigResId = IDI_APP_SILVER_ICON; smallResId = IDI_APP_SILVER_SMALL; break;
+            case ColorTheme::Gold:   bigResId = IDI_APP_GOLD_ICON;   smallResId = IDI_APP_GOLD_SMALL;   break;
+            case ColorTheme::Green:
+            default:                 bigResId = IDI_APP_ICON;        smallResId = IDI_APP_ICON_SMALL;   break;
+        }
+    }
+
+    wc.hIcon   = LoadIconW(hInstance, MAKEINTRESOURCEW(bigResId));
     if (!wc.hIcon)   wc.hIcon   = LoadIconW(nullptr, IDI_APPLICATION);
-    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON_SMALL));
+    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(smallResId));
     if (!wc.hIconSm) wc.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
 
     wc.lpszClassName = kClassName;
@@ -99,19 +117,25 @@ void MainWindow::RegisterClass(HINSTANCE hInstance) {
 }
 
 bool MainWindow::CreateWindow_(HINSTANCE hInstance) {
-    // Center on primary monitor
+    // Standard framed window style with native Windows caption, system menu, and minimize box
+    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+
+    RECT rc = { 0, 0, m_width, m_height };
+    AdjustWindowRectEx(&rc, style, FALSE, WS_EX_APPWINDOW);
+    int winW = rc.right - rc.left;
+    int winH = rc.bottom - rc.top;
+
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
-    int x = (screenW - m_width)  / 2;
-    int y = (screenH - m_height) / 2;
+    int x = (screenW - winW)  / 2;
+    int y = (screenH - winH) / 2;
 
-    DWORD style = WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
     m_hwnd = CreateWindowExW(
         WS_EX_APPWINDOW,
         kClassName,
         ApplicationMetadata::AppName,
         style,
-        x, y, m_width, m_height,
+        x, y, winW, winH,
         nullptr, nullptr, hInstance, this);
 
     if (m_hwnd) {
@@ -120,45 +144,51 @@ bool MainWindow::CreateWindow_(HINSTANCE hInstance) {
             m_dpiScale = dpi / 96.f;
             m_width  = (int)(820.f * m_dpiScale);
             m_height = (int)(560.f * m_dpiScale);
-            // Re-center with correct DPI
+
+            RECT rcDpi = { 0, 0, m_width, m_height };
+            AdjustWindowRectEx(&rcDpi, style, FALSE, WS_EX_APPWINDOW);
+            winW = rcDpi.right - rcDpi.left;
+            winH = rcDpi.bottom - rcDpi.top;
+
             int sw = GetSystemMetricsForDpi(SM_CXSCREEN, dpi);
             int sh = GetSystemMetricsForDpi(SM_CYSCREEN, dpi);
-            x = (sw - m_width)  / 2;
-            y = (sh - m_height) / 2;
-            SetWindowPos(m_hwnd, nullptr, x, y, m_width, m_height, SWP_NOZORDER | SWP_NOACTIVATE);
+            x = (sw - winW)  / 2;
+            y = (sh - winH) / 2;
+            SetWindowPos(m_hwnd, nullptr, x, y, winW, winH, SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        // Enable DWM Immersive Dark Mode (modern Win10 / Win11)
+
+        // 1. Set window title and enable DWM Immersive Dark Mode for native Windows caption
+        SetWindowTextW(m_hwnd, ApplicationMetadata::AppName);
         BOOL darkMode = TRUE;
         DwmSetWindowAttribute(m_hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &darkMode, sizeof(darkMode));
         DwmSetWindowAttribute(m_hwnd, 19 /* DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 */, &darkMode, sizeof(darkMode));
 
-        // Request rounded corners on Windows 11
-        DWORD cornerPref = 2; // DWMWCP_ROUNDED
+        // 2. Request native rounded corners on Windows 11 (DWMWCP_ROUND = 2)
+        DWORD cornerPref = 2; // DWMWCP_ROUND
         DwmSetWindowAttribute(m_hwnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &cornerPref, sizeof(cornerPref));
 
+        // 3. Native title bar caption color matching dark theme (#101310)
         COLORREF captionColor = RGB(16, 19, 16);
         DwmSetWindowAttribute(m_hwnd, 35 /* DWMWA_CAPTION_COLOR */, &captionColor, sizeof(captionColor));
 
+        // 4. Native title text color: crisp light off-white
+        COLORREF textColor = RGB(241, 244, 239);
+        DwmSetWindowAttribute(m_hwnd, 36 /* DWMWA_TEXT_COLOR */, &textColor, sizeof(textColor));
+
+        // 5. Subtle DWM border matching obsidian dark theme
         COLORREF borderColor = RGB(36, 41, 36);
         DwmSetWindowAttribute(m_hwnd, 34 /* DWMWA_BORDER_COLOR */, &borderColor, sizeof(borderColor));
 
         m_navRail = std::make_shared<NavigationRail>();
-        float sw = ds::Dims::SidebarW * m_dpiScale;
-        bool isRtl = Localization::Instance().IsRTL();
-        float sbX = isRtl ? (m_width - sw) : 0.f;
-        m_navRail->SetBounds(D2D1::RectF(sbX, ds::Dims::TitleBarH * m_dpiScale, sbX + sw, (float)m_height));
+        m_navRail->SetDpiScale(m_dpiScale);
+        m_navRail->SetBounds(SidebarRect());
         m_navRail->OnNavigate = [this](PageId p) {
             LOG_INFO("[NAV] Navigation to page " + std::to_string(static_cast<int>(p)));
             UIStateManager::Instance().SetPage(p);
         };
         InputController::Instance().AddControl(m_navRail);
         
-        HICON hBig = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED);
-        HICON hSmall = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED);
-        if (hBig) SendMessageW(m_hwnd, WM_SETICON, ICON_BIG, (LPARAM)hBig);
-        if (hSmall) SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
-
-        SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+        UpdateAppIcon();
     }
 
     LOG_INFO("[WINDOW] Main HWND = " + std::to_string((uintptr_t)m_hwnd));
@@ -196,16 +226,38 @@ bool MainWindow::InitD2D() {
         // We still return true so the window is shown; OnPaint has a GDI fallback.
     }
 
-    // Initialize WIC and load logo from embedded resource at full native resolution
+    // Initialize WIC and load logos from embedded resources with high-quality downsampling
     hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory));
     if (SUCCEEDED(hr) && m_wicFactory && m_renderTarget) {
-        m_logoBitmap = ResourceLoader::LoadBitmapFromResource(
-            m_hInst, IDR_LOGO, m_wicFactory, m_renderTarget);
-        if (m_logoBitmap) {
-            LOG_INFO("MainWindow: Embedded logo loaded successfully from resource");
-        } else {
-            LOG_WARN("MainWindow: Failed to load embedded logo from resource");
+        UINT smallSize = (UINT)(48 * m_dpiScale);
+        if (smallSize < 48) smallSize = 48;
+        UINT largeSize = (UINT)(256 * m_dpiScale);
+        if (largeSize < 256) largeSize = 256;
+
+        struct LogoRes { int smallId; int largeId; };
+        LogoRes themes[6] = {
+            { IDR_LOGO_SMALL,        IDR_LOGO },        // Green
+            { IDR_LOGO_YELLOW_SMALL, IDR_LOGO_YELLOW }, // Yellow
+            { IDR_LOGO_BLUE_SMALL,   IDR_LOGO_BLUE },   // Blue
+            { IDR_LOGO_RED_SMALL,    IDR_LOGO_RED },    // Red
+            { IDR_LOGO_SILVER_SMALL, IDR_LOGO_SILVER }, // Silver
+            { IDR_LOGO_GOLD_SMALL,   IDR_LOGO_GOLD },   // Gold
+        };
+
+        for (int i = 0; i < 6; ++i) {
+            m_logoSmallBitmaps[i] = ResourceLoader::LoadBitmapFromResource(
+                m_hInst, themes[i].smallId, m_wicFactory, m_renderTarget, RT_RCDATA, smallSize, smallSize);
+            m_logoBitmaps[i] = ResourceLoader::LoadBitmapFromResource(
+                m_hInst, themes[i].largeId, m_wicFactory, m_renderTarget, RT_RCDATA, largeSize, largeSize);
         }
+
+        // Dormant silver/chrome/grey logos
+        m_logoDormantSmallBitmap = ResourceLoader::LoadBitmapFromResource(
+            m_hInst, IDR_LOGO_DORMANT_SMALL, m_wicFactory, m_renderTarget, RT_RCDATA, smallSize, smallSize);
+        m_logoDormantBitmap = ResourceLoader::LoadBitmapFromResource(
+            m_hInst, IDR_LOGO_DORMANT, m_wicFactory, m_renderTarget, RT_RCDATA, largeSize, largeSize);
+
+        LOG_INFO("MainWindow: Embedded theme logos loaded successfully with WIC resampler");
     }
 
     return true;
@@ -215,7 +267,7 @@ bool MainWindow::InitTextFormats() {
     auto tryCreateFormat = [&](IDWriteTextFormat** ppFmt,
                                 DWRITE_FONT_WEIGHT weight, float size) {
         HRESULT hr = m_dwriteFactory->CreateTextFormat(
-            L"Noto Sans", nullptr, weight,
+            L"Cairo", nullptr, weight,
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             size * m_dpiScale, L"en-US", ppFmt);
         if (FAILED(hr) || !*ppFmt) {
@@ -250,18 +302,22 @@ bool MainWindow::InitTextFormats() {
 }
 
 void MainWindow::InitPages(HINSTANCE hInstance) {
-    m_pages[PAGE_HOME]       = std::make_unique<HomePage>();
-    m_pages[PAGE_REMINDERS]  = std::make_unique<RemindersPage>();
-    m_pages[PAGE_SCHEDULE]   = std::make_unique<SchedulePage>();
-    m_pages[PAGE_LIBRARY]    = std::make_unique<LibraryPage>();
-    m_pages[PAGE_STATISTICS] = std::make_unique<StatisticsPage>();
-    m_pages[PAGE_SETTINGS]   = std::make_unique<SettingsPage>();
-    m_pages[PAGE_ABOUT]      = std::make_unique<AboutPage>();
+    LOG_INFO("[MAIN] InitPages called!");
+    m_pages[PAGE_HOME]      = std::make_unique<HomePage>();
+    m_pages[PAGE_REMINDERS] = std::make_unique<RemindersPage>();
+    m_pages[PAGE_LIBRARY]   = std::make_unique<LibraryPage>();
+    m_pages[PAGE_SETTINGS]  = std::make_unique<SettingsPage>();
+    m_pages[PAGE_ABOUT]     = std::make_unique<AboutPage>();
 }
 
 void MainWindow::ReleaseD2D() {
-    if (m_logoBitmap)    { m_logoBitmap->Release();    m_logoBitmap    = nullptr; }
-    if (m_wicFactory)    { m_wicFactory->Release();    m_wicFactory    = nullptr; }
+    if (m_logoDormantSmallBitmap) { m_logoDormantSmallBitmap->Release(); m_logoDormantSmallBitmap = nullptr; }
+    if (m_logoDormantBitmap)      { m_logoDormantBitmap->Release();      m_logoDormantBitmap      = nullptr; }
+    for (int i = 0; i < 6; ++i) {
+        if (m_logoSmallBitmaps[i]) { m_logoSmallBitmaps[i]->Release(); m_logoSmallBitmaps[i] = nullptr; }
+        if (m_logoBitmaps[i])      { m_logoBitmaps[i]->Release();      m_logoBitmaps[i]      = nullptr; }
+    }
+    if (m_wicFactory)      { m_wicFactory->Release();      m_wicFactory      = nullptr; }
     if (m_tfVersion)     { m_tfVersion->Release();     m_tfVersion     = nullptr; }
     if (m_tfAppName)     { m_tfAppName->Release();     m_tfAppName     = nullptr; }
     if (m_tfNavLabel)    { m_tfNavLabel->Release();    m_tfNavLabel    = nullptr; }
@@ -278,10 +334,13 @@ void MainWindow::Show() {
 
 void MainWindow::Hide() {
     ShowWindow(m_hwnd, SW_HIDE);
+    // Trim working set pages when hidden to tray to minimize RAM usage to ~2.8-3.5 MB
+    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
 }
 
 void MainWindow::NavigateTo(int pageId) {
     if (pageId < 0 || pageId >= kNavItems) return;
+    if (m_activePage == pageId) return; // Guard: do not re-activate or reset scroll of current active page
     m_activePage = pageId;
     if (m_pages[m_activePage]) {
         m_pages[m_activePage]->OnActivated();
@@ -291,18 +350,16 @@ void MainWindow::NavigateTo(int pageId) {
 
 D2D1_RECT_F MainWindow::SidebarRect() const {
     float sw = ds::Dims::SidebarW * m_dpiScale;
-    float th = ds::Dims::TitleBarH * m_dpiScale;
     bool isRtl = Localization::Instance().IsRTL();
-    if (isRtl) return D2D1::RectF((float)m_width - sw, th, (float)m_width, (float)m_height);
-    return D2D1::RectF(0, th, sw, (float)m_height);
+    if (isRtl) return D2D1::RectF((float)m_width - sw, 0.f, (float)m_width, (float)m_height);
+    return D2D1::RectF(0.f, 0.f, sw, (float)m_height);
 }
 
 D2D1_RECT_F MainWindow::ContentRect() const {
     float sw = ds::Dims::SidebarW * m_dpiScale;
-    float th = ds::Dims::TitleBarH * m_dpiScale;
     bool isRtl = Localization::Instance().IsRTL();
-    if (isRtl) return D2D1::RectF(0, th, (float)m_width - sw, (float)m_height);
-    return D2D1::RectF(sw, th, (float)m_width, (float)m_height);
+    if (isRtl) return D2D1::RectF(0.f, 0.f, (float)m_width - sw, (float)m_height);
+    return D2D1::RectF(sw, 0.f, (float)m_width, (float)m_height);
 }
 
 // ── State ───────────────────────────────────────────────────────────────────
@@ -326,7 +383,7 @@ void MainWindow::OnPaint() {
         return;
     }
 
-    // ── D2D path ────────────────────────────────────────────────────────────
+    // ── D2D path ────────────────────────────────────────────────────
     // BeginPaint/EndPaint validate the dirty region; D2D draws independently
     // into the HwndRenderTarget which is bound to the same HWND.
     EndPaint(m_hwnd, &ps); // release the GDI DC — D2D doesn't use it
@@ -339,7 +396,6 @@ void MainWindow::OnPaint() {
 
     DrawBackground(m_renderTarget);
     DrawSidebar(m_renderTarget);
-    WindowChrome::Instance().Draw(m_renderTarget, m_brush, m_tfAppName, m_tfIcon, m_logoBitmap);
     DrawCurrentPage(m_renderTarget);
 
     HRESULT hr = m_renderTarget->EndDraw();
@@ -352,31 +408,65 @@ void MainWindow::OnPaint() {
 }
 
 void MainWindow::DrawBackground(ID2D1RenderTarget* rt) {
-    if (!m_brush) return;
-    m_brush->SetColor(ds::Background());
-    rt->FillRectangle(D2D1::RectF(0, 0, (float)m_width, (float)m_height), m_brush);
+    if (!m_brush || !rt) return;
+
+    // Subtle atmospheric Aurora canvas gradient
+    D2D1_GRADIENT_STOP stops[4];
+    stops[0].position = 0.00f; stops[0].color = ds::Aurora::CanvasStop0(); // Top-Right Deep Moss Glow
+    stops[1].position = 0.35f; stops[1].color = ds::Aurora::CanvasStop1(); // Midnight Olive Pine
+    stops[2].position = 0.70f; stops[2].color = ds::Aurora::CanvasStop2(); // Abyssal Forest
+    stops[3].position = 1.00f; stops[3].color = ds::Aurora::CanvasStop3(); // Velvet Midnight Base
+
+    ID2D1GradientStopCollection* pStopCol = nullptr;
+    HRESULT hr = rt->CreateGradientStopCollection(stops, 4, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &pStopCol);
+    if (SUCCEEDED(hr) && pStopCol) {
+        bool isRtl = Localization::Instance().IsRTL();
+        // Top-right to bottom-left gradient flow (or top-left to bottom-right in RTL)
+        D2D1_POINT_2F startPt = isRtl ? D2D1::Point2F(0.0f, 0.0f) : D2D1::Point2F((float)m_width, 0.0f);
+        D2D1_POINT_2F endPt   = isRtl ? D2D1::Point2F((float)m_width, (float)m_height) : D2D1::Point2F(0.0f, (float)m_height);
+
+        ID2D1LinearGradientBrush* pGradBrush = nullptr;
+        hr = rt->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(startPt, endPt),
+            pStopCol,
+            &pGradBrush);
+        if (SUCCEEDED(hr) && pGradBrush) {
+            rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, (float)m_width, (float)m_height), pGradBrush);
+            pGradBrush->Release();
+        } else {
+            m_brush->SetColor(ds::Background());
+            rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, (float)m_width, (float)m_height), m_brush);
+        }
+        pStopCol->Release();
+    } else {
+        m_brush->SetColor(ds::Background());
+        rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, (float)m_width, (float)m_height), m_brush);
+    }
+
+    if (Settings::Instance().Get().arabesqueOverlay) {
+        ds::Arabesque::DrawLattice(rt, D2D1::RectF(0.0f, 0.0f, (float)m_width, (float)m_height), 0.025f);
+    }
 }
 
 void MainWindow::DrawSidebar(ID2D1RenderTarget* rt) {
     if (!m_brush) return;
     auto sr = SidebarRect();
 
-    // Sidebar background
     m_brush->SetColor(ds::Sidebar());
     rt->FillRectangle(sr, m_brush);
 
-    // Right border (or left if RTL)
+    // Divider border
     m_brush->SetColor(ds::Border());
     if (Localization::Instance().IsRTL()) {
         rt->DrawLine(
             D2D1::Point2F(sr.left, sr.top),
             D2D1::Point2F(sr.left, (float)m_height),
-            m_brush, 0.5f);
+            m_brush, 1.f * m_dpiScale);
     } else {
         rt->DrawLine(
             D2D1::Point2F(sr.right, sr.top),
             D2D1::Point2F(sr.right, (float)m_height),
-            m_brush, 0.5f);
+            m_brush, 1.f * m_dpiScale);
     }
 
     // Nav items
@@ -392,6 +482,7 @@ void MainWindow::DrawSidebar(ID2D1RenderTarget* rt) {
 void MainWindow::DrawSidebarItem(ID2D1RenderTarget* rt, int index,
                                   const wchar_t* label, float y,
                                   bool active, bool hover) {
+    if (!m_brush) return;
     auto r = m_navRail->GetItemRect(index);
     float sw = ds::Dims::SidebarW * m_dpiScale;
     bool isRtl = Localization::Instance().IsRTL();
@@ -450,9 +541,7 @@ void MainWindow::DrawNavIcon(ID2D1RenderTarget* rt, int pageId,
     switch (pageId) {
         case PAGE_HOME:       glyph = ds::Icon::Home; break;
         case PAGE_REMINDERS:  glyph = ds::Icon::Reminders; break;
-        case PAGE_SCHEDULE:   glyph = ds::Icon::Schedule; break;
         case PAGE_LIBRARY:    glyph = ds::Icon::Library; break;
-        case PAGE_STATISTICS: glyph = ds::Icon::Statistics; break;
         case PAGE_SETTINGS:   glyph = ds::Icon::Settings; break;
         case PAGE_ABOUT:      glyph = ds::Icon::About; break;
     }
@@ -462,30 +551,89 @@ void MainWindow::DrawNavIcon(ID2D1RenderTarget* rt, int pageId,
     rt->DrawTextW(glyph, 1, m_tfIcon, rect, m_brush);
 }
 
+ID2D1Bitmap* MainWindow::GetThemeLogo(ColorTheme theme, bool isSmall) const {
+    int idx = std::clamp((int)theme, 0, 5);
+    if (isSmall) {
+        return m_logoSmallBitmaps[idx] ? m_logoSmallBitmaps[idx] : m_logoSmallBitmaps[0];
+    }
+    return m_logoBitmaps[idx] ? m_logoBitmaps[idx] : m_logoBitmaps[0];
+}
+
+ID2D1Bitmap* MainWindow::GetEffectiveLogo(bool isSmall) const {
+    if (ds::Accent::IsAppPaused()) {
+        if (isSmall) {
+            return m_logoDormantSmallBitmap ? m_logoDormantSmallBitmap : m_logoDormantBitmap;
+        }
+        return m_logoDormantBitmap ? m_logoDormantBitmap : m_logoDormantSmallBitmap;
+    }
+    return GetThemeLogo(Settings::Instance().Get().colorTheme, isSmall);
+}
+
+void MainWindow::DrawEffectiveLogo(ID2D1RenderTarget* rt, const D2D1_RECT_F& dest, bool isSmall, float alpha) const {
+    if (!rt) return;
+
+    if (ds::Accent::IsAppPaused()) {
+        ID2D1Bitmap* dormant = isSmall ? (m_logoDormantSmallBitmap ? m_logoDormantSmallBitmap : m_logoDormantBitmap)
+                                       : (m_logoDormantBitmap ? m_logoDormantBitmap : m_logoDormantSmallBitmap);
+        if (dormant) {
+            D2D1_SIZE_F sz = dormant->GetSize();
+            D2D1_RECT_F fit = LogoRenderer::FitRect(dest, sz.width, sz.height);
+            rt->DrawBitmap(dormant, fit, alpha, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        } else {
+            LogoRenderer::Draw(rt, dest, alpha);
+        }
+        return;
+    }
+
+    if (ds::Accent::IsTransitioning()) {
+        ID2D1Bitmap* bmpFrom = GetThemeLogo(ds::Accent::FromTheme(), isSmall);
+        ID2D1Bitmap* bmpTo   = GetThemeLogo(ds::Accent::ToTheme(), isSmall);
+        float t = ds::Accent::GetTransitionProgress();
+
+        if (bmpFrom && bmpTo) {
+            D2D1_SIZE_F sz = bmpFrom->GetSize();
+            D2D1_RECT_F fit = LogoRenderer::FitRect(dest, sz.width, sz.height);
+            // Seamless cross-fade
+            if (1.0f - t > 0.001f) {
+                rt->DrawBitmap(bmpFrom, fit, alpha * (1.0f - t), D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            }
+            if (t > 0.001f) {
+                rt->DrawBitmap(bmpTo, fit, alpha * t, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            }
+            return;
+        }
+    }
+
+    ID2D1Bitmap* activeLogo = GetEffectiveLogo(isSmall);
+    if (activeLogo) {
+        D2D1_SIZE_F sz = activeLogo->GetSize();
+        D2D1_RECT_F fit = LogoRenderer::FitRect(dest, sz.width, sz.height);
+        rt->DrawBitmap(activeLogo, fit, alpha, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    } else {
+        LogoRenderer::Draw(rt, dest, alpha);
+    }
+}
+
 void MainWindow::DrawSidebarBottom(ID2D1RenderTarget* rt) {
     if (!m_brush) return;
     auto sr = SidebarRect();
     float pad = ds::Space::L * m_dpiScale;
     float bottomY = (float)m_height - 40.f * m_dpiScale;
 
-    // Logo
+    // Smooth animated 3D coin medallion
     float cx = sr.left + (sr.right - sr.left) / 2.f;
     float cy = bottomY - 14.f * m_dpiScale;
-    float size = 13.f * m_dpiScale;
+    float size = 18.f * m_dpiScale;
     D2D1_RECT_F rect = D2D1::RectF(cx - size, cy - size, cx + size, cy + size);
-    if (m_logoBitmap) {
-        D2D1_SIZE_F sz = m_logoBitmap->GetSize();
-        D2D1_RECT_F fitRect = LogoRenderer::FitRect(rect, sz.width, sz.height);
-        rt->DrawBitmap(m_logoBitmap, fitRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-    } else {
-        LogoRenderer::Draw(rt, rect, 1.0f);
-    }
+    DrawEffectiveLogo(rt, rect, true, 1.0f);
 
     // Version string
     if (m_tfVersion) {
         m_brush->SetColor(ds::TextMuted());
         std::wstring vstr = Localization::Instance().Get(L"about.version") + L" " + ApplicationMetadata::AppVersion;
         D2D1_RECT_F vr = D2D1::RectF(sr.left, bottomY + 8.f*m_dpiScale, sr.right, bottomY + 30.f*m_dpiScale);
+        m_tfVersion->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        m_tfVersion->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         rt->DrawTextW(vstr.c_str(), (UINT32)vstr.size(), m_tfVersion, vr, m_brush);
     }
 }
@@ -505,8 +653,8 @@ LRESULT MainWindow::OnSize(int w, int h) {
         m_renderTarget->Resize(D2D1::SizeU(w, h));
     }
     
-    WindowChrome::Instance().UpdateMetrics(m_dpiScale, w, h);
     if (m_navRail) {
+        m_navRail->SetDpiScale(m_dpiScale);
         m_navRail->SetBounds(SidebarRect());
     }
     
@@ -522,14 +670,14 @@ LRESULT MainWindow::OnCommand(WPARAM wp) {
         case ID_TRAY_OPEN:
             Show();
             break;
-        case ID_TRAY_PAUSE_15:   Scheduler::Instance().Pause(15);  TrayIcon::Instance().SetPaused(true);  break;
-        case ID_TRAY_PAUSE_30:   Scheduler::Instance().Pause(30);  TrayIcon::Instance().SetPaused(true);  break;
-        case ID_TRAY_PAUSE_60:   Scheduler::Instance().Pause(60);  TrayIcon::Instance().SetPaused(true);  break;
-        case ID_TRAY_PAUSE_120:  Scheduler::Instance().Pause(120); TrayIcon::Instance().SetPaused(true);  break;
-        case ID_TRAY_PAUSE_TODAY: Scheduler::Instance().PauseUntilTomorrow(); TrayIcon::Instance().SetPaused(true); break;
-        case ID_TRAY_RESUME:     Scheduler::Instance().Resume();    TrayIcon::Instance().SetPaused(false); break;
+        case ID_TRAY_PAUSE_15:   Scheduler::Instance().Pause(15);  TrayIcon::Instance().SetPaused(true);  UpdateAppIcon(); Invalidate(); break;
+        case ID_TRAY_PAUSE_30:   Scheduler::Instance().Pause(30);  TrayIcon::Instance().SetPaused(true);  UpdateAppIcon(); Invalidate(); break;
+        case ID_TRAY_PAUSE_60:   Scheduler::Instance().Pause(60);  TrayIcon::Instance().SetPaused(true);  UpdateAppIcon(); Invalidate(); break;
+        case ID_TRAY_PAUSE_120:  Scheduler::Instance().Pause(120); TrayIcon::Instance().SetPaused(true); UpdateAppIcon(); Invalidate(); break;
+        case ID_TRAY_PAUSE_TODAY: Scheduler::Instance().PauseUntilTomorrow(); TrayIcon::Instance().SetPaused(true); UpdateAppIcon(); Invalidate(); break;
+        case ID_TRAY_RESUME:     Scheduler::Instance().Resume();    TrayIcon::Instance().SetPaused(false); UpdateAppIcon(); Invalidate(); break;
         case ID_TRAY_SETTINGS:   Show(); NavigateTo(PAGE_SETTINGS); break;
-        case ID_TRAY_STATISTICS: Show(); NavigateTo(PAGE_STATISTICS); break;
+        case ID_TRAY_STATISTICS: Show(); NavigateTo(PAGE_HOME); break;
         case ID_TRAY_ABOUT:      Show(); NavigateTo(PAGE_ABOUT); break;
         case ID_TRAY_EXIT:
             Application::Instance().Shutdown();
@@ -545,7 +693,21 @@ LRESULT MainWindow::OnCommand(WPARAM wp) {
     return 0;
 }
 
-LRESULT MainWindow::OnReminder() {
+LRESULT MainWindow::OnReminder(bool forcePreview) {
+    if (forcePreview) {
+        if (PopupWindow::Instance().IsVisible()) {
+            PopupWindow::Instance().Hide();
+        }
+        auto* item = ContentEngine::Instance().GetNext();
+        if (item) {
+            PopupWindow::Instance().Show(item);
+        }
+        return 0;
+    }
+
+    if (PopupWindow::Instance().IsVisible()) {
+        return 0;
+    }
     auto* item = ContentEngine::Instance().GetNext();
     if (item) {
         // Fullscreen distraction protection check
@@ -587,20 +749,105 @@ LRESULT MainWindow::OnReminder() {
     return 0;
 }
 
+void MainWindow::UpdateAppIcon(ColorTheme themeOverride) {
+    if (!m_hwnd) return;
+    int cxBig = GetSystemMetrics(SM_CXICON);
+    int cyBig = GetSystemMetrics(SM_CYICON);
+    int cxSmall = GetSystemMetrics(SM_CXSMICON);
+    int cySmall = GetSystemMetrics(SM_CYSMICON);
+    int bigResId = IDI_APP_ICON;
+    int smallResId = IDI_APP_ICON_SMALL;
+
+    ColorTheme activeTheme = (themeOverride != static_cast<ColorTheme>(-1)) ? themeOverride
+        : (ds::Accent::IsTransitioning() ? m_targetTheme : Settings::Instance().Get().colorTheme);
+
+    if (ds::Accent::IsAppPaused()) {
+        bigResId = IDI_APP_DORMANT_ICON;
+        smallResId = IDI_APP_DORMANT_SMALL;
+    } else {
+        switch (activeTheme) {
+            case ColorTheme::Yellow: bigResId = IDI_APP_YELLOW_ICON; smallResId = IDI_APP_YELLOW_SMALL; break;
+            case ColorTheme::Blue:   bigResId = IDI_APP_BLUE_ICON;   smallResId = IDI_APP_BLUE_SMALL;   break;
+            case ColorTheme::Red:    bigResId = IDI_APP_RED_ICON;    smallResId = IDI_APP_RED_SMALL;    break;
+            case ColorTheme::Silver: bigResId = IDI_APP_SILVER_ICON; smallResId = IDI_APP_SILVER_SMALL; break;
+            case ColorTheme::Gold:   bigResId = IDI_APP_GOLD_ICON;   smallResId = IDI_APP_GOLD_SMALL;   break;
+            case ColorTheme::Green:
+            default:                 bigResId = IDI_APP_ICON;        smallResId = IDI_APP_ICON_SMALL;   break;
+        }
+    }
+
+    HICON hBig = (HICON)LoadImageW(m_hInst, MAKEINTRESOURCEW(bigResId), IMAGE_ICON, cxBig, cyBig, LR_SHARED);
+    if (!hBig) hBig = LoadIconW(m_hInst, MAKEINTRESOURCEW(bigResId));
+
+    HICON hSmall = (HICON)LoadImageW(m_hInst, MAKEINTRESOURCEW(smallResId), IMAGE_ICON, cxSmall, cySmall, LR_SHARED);
+    if (!hSmall) hSmall = LoadIconW(m_hInst, MAKEINTRESOURCEW(smallResId));
+
+    m_hCurrentIconBig = hBig;
+    m_hCurrentIconSmall = hSmall;
+
+    if (hBig) {
+        SendMessageW(m_hwnd, WM_SETICON, ICON_BIG, (LPARAM)hBig);
+        SetClassLongPtrW(m_hwnd, GCLP_HICON, (LONG_PTR)hBig);
+    }
+    if (hSmall) {
+        SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
+        SetClassLongPtrW(m_hwnd, GCLP_HICONSM, (LONG_PTR)hSmall);
+    }
+
+    // Force DWM frame and title bar to immediately re-render caption icon
+    SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    RedrawWindow(m_hwnd, nullptr, nullptr, RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+}
+
+inline float EaseInOutCubic(float t) {
+    return t < 0.5f ? 4.0f * t * t * t : 1.0f - std::pow(-2.0f * t + 2.0f, 3.0f) / 2.0f;
+}
+
+void MainWindow::TransitionToTheme(ColorTheme newTheme) {
+    ColorTheme oldTheme = Settings::Instance().Get().colorTheme;
+    if (oldTheme == newTheme && !ds::Accent::IsTransitioning()) return;
+
+    m_prevTheme = ds::Accent::IsTransitioning() ? ds::Accent::ToTheme() : oldTheme;
+    m_targetTheme = newTheme;
+    m_themeAnimStartTime = GetTickCount();
+    m_themeAnimDuration = 350.0f;
+
+    ds::Accent::StartTransition(m_prevTheme, m_targetTheme);
+
+    // Immediately update window caption icon, taskbar icon, and tray icon!
+    UpdateAppIcon(m_targetTheme);
+    TrayIcon::Instance().UpdateIcon(m_targetTheme);
+
+    SetTimer(m_hwnd, TIMER_THEME_TRANSITION, 16, nullptr);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
 LRESULT MainWindow::OnSettingsChanged() {
     if (m_navRail) {
+        m_navRail->SetDpiScale(m_dpiScale);
         m_navRail->SetBounds(SidebarRect());
     }
-    WindowChrome::Instance().UpdateMetrics(m_dpiScale, m_width, m_height);
 
     // Update icons for Tray and Taskbar Window
+    TrayIcon::Instance().SetPaused(ds::Accent::IsAppPaused());
     TrayIcon::Instance().UpdateIcon();
-    HICON hBig = (HICON)LoadImageW(m_hInst, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED);
-    HICON hSmall = (HICON)LoadImageW(m_hInst, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED);
-    if (hBig) SendMessageW(m_hwnd, WM_SETICON, ICON_BIG, (LPARAM)hBig);
-    if (hSmall) SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
+    UpdateAppIcon();
 
-    InitPages(m_hInst);
+    static std::wstring s_currentLanguage = Localization::Instance().GetLanguage();
+    std::wstring activeLang = Localization::Instance().GetLanguage();
+    if (activeLang != s_currentLanguage) {
+        s_currentLanguage = activeLang;
+        float savedScroll = 0.f;
+        if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
+            savedScroll = m_pages[m_activePage]->GetScrollY();
+        }
+        InitPages(m_hInst);
+        if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
+            m_pages[m_activePage]->SetScrollY(savedScroll);
+        }
+    }
+
     auto cr = ContentRect();
     for (auto& p : m_pages) {
         if (p) {
@@ -613,6 +860,39 @@ LRESULT MainWindow::OnSettingsChanged() {
 }
 
 LRESULT MainWindow::OnTimer(UINT_PTR timerId) {
+    if (timerId == TIMER_THEME_TRANSITION) {
+        DWORD elapsed = GetTickCount() - m_themeAnimStartTime;
+        float t = std::min(1.0f, (float)elapsed / m_themeAnimDuration);
+        float eased = EaseInOutCubic(t);
+        ds::Accent::SetTransitionProgress(eased);
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+
+        if (t >= 1.0f) {
+            KillTimer(m_hwnd, TIMER_THEME_TRANSITION);
+            ds::Accent::EndTransition(m_targetTheme);
+
+            auto& s = Settings::Instance().Get();
+            s.colorTheme = m_targetTheme;
+            switch (m_targetTheme) {
+                case ColorTheme::Yellow: s.accentColor = { 0xFA, 0xCC, 0x15 }; break;
+                case ColorTheme::Blue:   s.accentColor = { 0x38, 0xBD, 0xF8 }; break;
+                case ColorTheme::Red:    s.accentColor = { 0xF8, 0x71, 0x71 }; break;
+                case ColorTheme::Silver: s.accentColor = { 0xE2, 0xE8, 0xF0 }; break;
+                case ColorTheme::Gold:   s.accentColor = { 0xF5, 0xBA, 0x22 }; break;
+                case ColorTheme::Green:
+                default:                 s.accentColor = { 0xB7, 0xF3, 0x4A }; break;
+            }
+            Settings::Instance().Save();
+
+            TrayIcon::Instance().UpdateIcon();
+            UpdateAppIcon();
+
+            for (auto& p : m_pages) {
+                if (p) p->OnSettingsChanged();
+            }
+        }
+        return 0;
+    }
     if (timerId == TIMER_FULLSCREEN_RESUME) {
         if (m_pendingFullscreenReminder) {
             if (!FullScreenDetector::Instance().IsFullScreenActive()) {
@@ -641,7 +921,6 @@ LRESULT MainWindow::OnMouseMove(int x, int y) {
     }
 
     bool needsRepaint = false;
-    if (WindowChrome::Instance().OnMouseMove((float)x, (float)y)) needsRepaint = true;
     if (InputController::Instance().OnMouseMove((float)x, (float)y)) needsRepaint = true;
     
     if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
@@ -655,7 +934,6 @@ LRESULT MainWindow::OnMouseMove(int x, int y) {
 LRESULT MainWindow::OnMouseLeave() {
     m_mouseTracking = false;
     bool needsRepaint = false;
-    if (WindowChrome::Instance().OnMouseLeave()) needsRepaint = true;
     if (InputController::Instance().OnMouseLeave()) needsRepaint = true;
 
     if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
@@ -677,14 +955,8 @@ LRESULT MainWindow::OnMouseWheel(int delta) {
 
 LRESULT MainWindow::OnLButtonDown(int x, int y) {
     LOG_INFO("[INPUT] WM_LBUTTONDOWN hwnd=" + std::to_string((uintptr_t)m_hwnd) + " x=" + std::to_string(x) + " y=" + std::to_string(y));
-    
-    POINT pt;
-    GetCursorPos(&pt);
-    HWND wndFromPt = WindowFromPoint(pt);
-    LOG_INFO("[INPUT] WindowFromPoint=" + std::to_string((uintptr_t)wndFromPt) + " MainWindow=" + std::to_string((uintptr_t)m_hwnd));
 
     bool needsRepaint = false;
-    if (WindowChrome::Instance().OnLButtonDown((float)x, (float)y)) needsRepaint = true;
     if (InputController::Instance().OnLButtonDown((float)x, (float)y)) needsRepaint = true;
 
     if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
@@ -697,7 +969,6 @@ LRESULT MainWindow::OnLButtonDown(int x, int y) {
 
 LRESULT MainWindow::OnLButtonUp(int x, int y) {
     bool needsRepaint = false;
-    if (WindowChrome::Instance().OnLButtonUp(m_hwnd, (float)x, (float)y)) needsRepaint = true;
     if (InputController::Instance().OnLButtonUp((float)x, (float)y)) needsRepaint = true;
 
     if (m_activePage >= 0 && m_activePage < kNavItems && m_pages[m_activePage]) {
@@ -724,23 +995,11 @@ LRESULT MainWindow::OnSetCursor(HWND hwnd, UINT hitTest, UINT message) {
 }
 
 LRESULT MainWindow::OnNcCalcSize(WPARAM wp, LPARAM lp) {
-    if (wp == TRUE) {
-        if (IsZoomed(m_hwnd)) {
-            auto* pnc = reinterpret_cast<NCCALCSIZE_PARAMS*>(lp);
-            HMONITOR hMon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
-            MONITORINFO mi{ sizeof(mi) };
-            if (GetMonitorInfoW(hMon, &mi)) {
-                pnc->rgrc[0] = mi.rcWork;
-            }
-        }
-        return 0;
-    }
     return DefWindowProcW(m_hwnd, WM_NCCALCSIZE, wp, lp);
 }
 
 LRESULT MainWindow::OnNcHitTest(int x, int y) {
-    LRESULT hit = WindowChrome::Instance().HitTest(m_hwnd, x, y);
-    return hit;
+    return DefWindowProcW(m_hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
 }
 
 LRESULT MainWindow::OnPowerBroadcast(WPARAM wp) {
@@ -758,16 +1017,20 @@ LRESULT MainWindow::OnTrayCallback(LPARAM lp) {
 LRESULT MainWindow::OnGetMinMaxInfo(MINMAXINFO* mmi) {
     mmi->ptMinTrackSize.x = (LONG)(ds::Dims::MainWindowMinW * m_dpiScale);
     mmi->ptMinTrackSize.y = (LONG)(ds::Dims::MainWindowMinH * m_dpiScale);
+    mmi->ptMaxTrackSize.x = (LONG)(ds::Dims::MainWindowW * 1.35f * m_dpiScale);
+    mmi->ptMaxTrackSize.y = (LONG)(ds::Dims::MainWindowH * 1.35f * m_dpiScale);
     return 0;
 }
 
 LRESULT MainWindow::OnClose() {
+    LOG_INFO("MainWindow::OnClose called");
     // Hide to tray instead of closing
     Hide();
     return 0;
 }
 
 LRESULT MainWindow::OnDestroy() {
+    LOG_INFO("MainWindow::OnDestroy called");
     KillTimer(m_hwnd, TIMER_FULLSCREEN_RESUME);
     m_pendingFullscreenReminder = nullptr;
     PostQuitMessage(0);
@@ -793,14 +1056,30 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
     if (!self) return DefWindowProcW(hwnd, msg, wp, lp);
 
+    static UINT s_uTaskbarRestartMsg = RegisterWindowMessageW(L"TaskbarCreated");
+    if (msg == s_uTaskbarRestartMsg && s_uTaskbarRestartMsg != 0) {
+        TrayIcon::Instance().Create(self->m_hwnd, self->m_hInst);
+        return 0;
+    }
+
     switch (msg) {
+        case WM_GETICON: {
+            if (wp == ICON_SMALL || wp == 2 /* ICON_SMALL2 */) {
+                return (LRESULT)self->m_hCurrentIconSmall;
+            }
+            return (LRESULT)self->m_hCurrentIconBig;
+        }
         case WM_PAINT:
             self->OnPaint();
             return 0;
         case WM_SIZE:             return self->OnSize(LOWORD(lp), HIWORD(lp));
         case WM_COMMAND:          return self->OnCommand(wp);
-        case WM_REMINDER_TRIGGER: return self->OnReminder();
+        case WM_REMINDER_TRIGGER: return self->OnReminder(wp == 1);
         case WM_SETTINGS_CHANGED: return self->OnSettingsChanged();
+        case WM_THEME_CHANGED: {
+            self->TransitionToTheme((ColorTheme)wp);
+            return 0;
+        }
         case WM_TIMER:            return self->OnTimer((UINT_PTR)wp);
         case WM_MOUSEMOVE:        return self->OnMouseMove(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
         case WM_MOUSEWHEEL:       return self->OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wp));
@@ -829,10 +1108,20 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         case WM_POWERBROADCAST:   return self->OnPowerBroadcast(wp);
         case WM_TRAY_CALLBACK:    return self->OnTrayCallback(lp);
         case WM_GETMINMAXINFO:    return self->OnGetMinMaxInfo((MINMAXINFO*)lp);
-        case WM_NCCALCSIZE:       return self->OnNcCalcSize(wp, lp);
-        case WM_NCPAINT:          return 0; // prevent standard border painting
-        case WM_NCACTIVATE:       return TRUE; // handled — prevents default light non-client border painting
-        case WM_NCHITTEST:        return self->OnNcHitTest(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+        case WM_NCCALCSIZE:       return DefWindowProcW(hwnd, msg, wp, lp);
+        case WM_NCPAINT:          return DefWindowProcW(hwnd, msg, wp, lp);
+        case WM_NCACTIVATE:       return DefWindowProcW(hwnd, msg, wp, lp);
+        case WM_NCHITTEST:        return DefWindowProcW(hwnd, msg, wp, lp);
+        case WM_NCLBUTTONDBLCLK:  return 0; // Disable maximize on title bar double click
+        case WM_SYSCOMMAND: {
+            if ((wp & 0xFFF0) == SC_MAXIMIZE) return 0; // Ignore maximize commands
+            if ((wp & 0xFFF0) == SC_MINIMIZE) {
+                LRESULT res = DefWindowProcW(hwnd, msg, wp, lp);
+                SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+                return res;
+            }
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        }
         case WM_CLOSE:            return self->OnClose();
         case WM_DESTROY:          return self->OnDestroy();
         case WM_ERASEBKGND:       return 1; // prevent flicker
@@ -875,8 +1164,8 @@ LRESULT MainWindow::OnDpiChanged(UINT newDpi, const RECT* newRect) {
     InitTextFormats();
 
     // Trigger components to update sizes
-    WindowChrome::Instance().UpdateMetrics(m_dpiScale, m_width, m_height);
     if (m_navRail) {
+        m_navRail->SetDpiScale(m_dpiScale);
         m_navRail->SetBounds(SidebarRect());
     }
 

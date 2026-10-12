@@ -10,7 +10,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
                       LPWSTR    lpCmdLine,
                       int       /*nCmdShow*/) {
     // ── Single instance enforcement ────────────────────────────────────────
-    HANDLE hMutex = CreateMutexW(nullptr, TRUE, L"AzkarReminderSingleInstanceV2");
+    HANDLE hMutex = CreateMutexW(nullptr, TRUE, L"AzkarReminderSingleInstanceV1_2");
     if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND existing = FindWindowW(L"DhikrMain", nullptr);
         
@@ -26,11 +26,15 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
 
         // Normal launch: Bring existing window to foreground
         if (existing) {
+            // PostMessage to tell existing window thread to show itself
+            PostMessageW(existing, WM_COMMAND, 2001 /* ID_TRAY_OPEN */, 0);
+            ShowWindow(existing, SW_SHOW);
             ShowWindow(existing, SW_RESTORE);
             SetForegroundWindow(existing);
+            CloseHandle(hMutex);
+            return 0;
         }
-        CloseHandle(hMutex);
-        return 0;
+        // If existing window handle was not found (stale mutex), proceed to run
     }
 
     // If --quit was passed but no instance was running, just exit

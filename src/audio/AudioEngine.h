@@ -15,8 +15,8 @@ public:
     bool Initialize(HINSTANCE hInstance);
     void Shutdown();
 
-    // Play the notification reminder sound
-    void PlayReminder();
+    // Play the notification reminder sound (optionally overriding volume 0.0 - 1.0)
+    void PlayReminder(float volumeOverride = -1.0f);
 
     // Stop any playing sound
     void Stop();
