@@ -7,6 +7,14 @@
 
 namespace dhikr {
 
+static inline void SafeLocalTime(struct tm* tm, const time_t* time) {
+#ifdef _WIN32
+    localtime_s(tm, time);
+#else
+    localtime_r(time, tm);
+#endif
+}
+
 Database& Database::Instance() {
     static Database instance;
     return instance;
@@ -90,7 +98,7 @@ bool Database::ExecuteSimple(const char* sql) {
 std::string Database::CurrentISO8601() {
     auto now = std::time(nullptr);
     std::tm tm{};
-    localtime_s(&tm, &now);
+    SafeLocalTime(&tm, &now);
     std::ostringstream ss;
     ss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S");
     return ss.str();
@@ -99,7 +107,7 @@ std::string Database::CurrentISO8601() {
 std::string Database::TodayString() {
     auto now = std::time(nullptr);
     std::tm tm{};
-    localtime_s(&tm, &now);
+    SafeLocalTime(&tm, &now);
     std::ostringstream ss;
     ss << std::put_time(&tm, "%Y-%m-%d");
     return ss.str();
@@ -185,7 +193,7 @@ int Database::GetCurrentStreakDays() {
 
     auto now = std::time(nullptr);
     std::tm tm{};
-    localtime_s(&tm, &now);
+    SafeLocalTime(&tm, &now);
 
     int streak = 0;
     for (size_t i = 0; i < days.size(); ++i) {

@@ -22,6 +22,14 @@ ContentEngine& ContentEngine::Instance() {
     return instance;
 }
 
+static inline void SafeLocalTime(struct tm* tm, const time_t* time) {
+#ifdef _WIN32
+    localtime_s(tm, time);
+#else
+    localtime_r(time, tm);
+#endif
+}
+
 static std::wstring Utf8ToWide(const std::string& str) {
     if (str.empty()) return L"";
 #ifdef _WIN32
@@ -480,7 +488,7 @@ double ContentEngine::ComputeWeight(const ContentItem& item,
     // ── Time-of-Day Context Awareness ──────────────────────────────────────────
     time_t nowTime = time(nullptr);
     struct tm lt{};
-    localtime_s(&lt, &nowTime);
+    SafeLocalTime(&lt, &nowTime);
     int hour = lt.tm_hour; // 0..23
 
     auto containsKeyword = [&](const std::wstring& kw) {

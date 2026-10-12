@@ -34,10 +34,12 @@ jobs:
         if (!(Test-Path "build\bin\Release\AzkarReminder.exe")) { throw "Executable not found" }
         if (!(Test-Path "build\bin\Release\audio\diode_matrix.mp3")) { throw "Audio asset not found" }
 
+    - name: Install Inno Setup
+      run: choco install innosetup -y --no-progress
+
     - name: Compile Inno Setup Installer
-      uses: minicomp/iscc-action@v1
-      with:
-        iscc: installer/AzkarReminder.iss
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AzkarReminder.iss
 
     - name: Upload Windows Installer
       uses: actions/upload-artifact@v4
