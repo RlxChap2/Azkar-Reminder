@@ -16,6 +16,7 @@
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QDateTime>
+#include <QGuiApplication>
 
 namespace dhikr::qt {
 

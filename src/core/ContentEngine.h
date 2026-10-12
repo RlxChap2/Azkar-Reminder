@@ -71,6 +71,7 @@ public:
 
     // All items (for the library page)
     const std::vector<ContentItem>& GetAllItems() const { return m_items; }
+    const std::vector<ContentItem>& GetItems() const { return m_items; }
     std::vector<ContentItem>& GetItemsMutable() { return m_items; }
 
     // Add a new custom item and persist to disk

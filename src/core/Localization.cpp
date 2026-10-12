@@ -548,17 +548,17 @@ Localization& Localization::Instance() {
 Localization::Localization() : m_currentLang(L"en"), m_isRtl(false) {
 }
 
-std::wstring Localization::Get(const std::wstring& key) {
+std::wstring Localization::Get(const std::wstring& key, const std::wstring& fallback) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_currentLang == L"ar") {
         auto it = g_ar.find(key);
-        if (it != g_ar.end()) return it->second;
+        if (it != g_ar.end() && !it->second.empty()) return it->second;
     } else {
         auto it = g_en.find(key);
-        if (it != g_en.end()) return it->second;
+        if (it != g_en.end() && !it->second.empty()) return it->second;
     }
-    // Fallback to key itself if not found
-    return key;
+    // Fallback if not found
+    return fallback.empty() ? key : fallback;
 }
 
 void Localization::SetLanguage(const std::wstring& langCode) {

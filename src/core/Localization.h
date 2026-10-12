@@ -11,7 +11,7 @@ public:
     static Localization& Instance();
 
     // Get a localized string by its key
-    std::wstring Get(const std::wstring& key);
+    std::wstring Get(const std::wstring& key, const std::wstring& fallback = L"");
 
     // Change the language ("en" or "ar")
     void SetLanguage(const std::wstring& langCode);
