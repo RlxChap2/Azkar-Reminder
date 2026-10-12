@@ -42,8 +42,7 @@ bool MiniAudioEngine::Initialize() {
     }
 
     m_initialized = true;
-    LOG_INFO("MiniAudio engine initialized successfully (backend: " + 
-             std::string(ma_get_backend_name(m_engine->pDevice ? m_engine->pDevice->playback.backend : ma_backend_null)) + ")");
+    LOG_INFO("MiniAudio engine initialized successfully");
     return true;
 }
 
@@ -118,7 +117,7 @@ void MiniAudioEngine::PlayReminder(float volumeOverride) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_initialized && !Initialize()) return;
 
-    float vol = volumeOverride >= 0.0f ? volumeOverride : (Settings::Instance().Get().volumePercent / 100.0f);
+    float vol = volumeOverride >= 0.0f ? volumeOverride : (Settings::Instance().Get().soundVolume / 100.0f);
     if (vol < 0.0f) vol = 0.0f;
     if (vol > 1.0f) vol = 1.0f;
 

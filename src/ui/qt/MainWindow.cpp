@@ -203,7 +203,8 @@ QWidget* MainWindow::CreateRemindersPage() {
     m_comboInterval = new QComboBox();
     m_comboInterval->addItems({"5 دقائق", "10 دقائق", "15 دقيقة", "20 دقيقة", "30 دقيقة", "45 دقيقة", "60 دقيقة", "90 دقيقة", "120 دقيقة"});
     
-    int currentMins = Settings::Instance().Get().intervalMinutes;
+    int currentMins = Settings::Instance().Get().weeklySchedule[0].frequencyMinutes;
+    if (currentMins <= 0) currentMins = 15;
     int idx = 2; // default 15
     if (currentMins == 5) idx = 0;
     else if (currentMins == 10) idx = 1;
@@ -229,7 +230,9 @@ QWidget* MainWindow::CreateRemindersPage() {
             case 7: minutes = 90; break;
             case 8: minutes = 120; break;
         }
-        Settings::Instance().Get().intervalMinutes = minutes;
+        for (int i = 0; i < 7; ++i) {
+            Settings::Instance().Get().weeklySchedule[i].frequencyMinutes = minutes;
+        }
         Settings::Instance().Save();
         Scheduler::Instance().Recalculate();
     });
@@ -242,20 +245,38 @@ QWidget* MainWindow::CreateRemindersPage() {
     // Quiet hours
     auto* grpQuiet = new QGroupBox(QString::fromStdWString(Localization::Instance().Get(L"reminders.quiet_hours", L"ساعات الهدوء")));
     auto* lQuiet = new QVBoxLayout(grpQuiet);
+    bool hasQuiet = !Settings::Instance().Get().quietPeriods.empty();
     m_chkQuietHours = new QCheckBox(QString::fromStdWString(Localization::Instance().Get(L"reminders.quiet_enable", L"تفعيل ساعات الهدوء (إيقاف مؤقت للتذكيرات ليلاً)")));
-    m_chkQuietHours->setChecked(Settings::Instance().Get().quietHoursEnabled);
+    m_chkQuietHours->setChecked(hasQuiet);
+
+    int qStartH = 22, qStartM = 0, qEndH = 6, qEndM = 0;
+    if (hasQuiet) {
+        qStartH = Settings::Instance().Get().quietPeriods[0].startHour;
+        qStartM = Settings::Instance().Get().quietPeriods[0].startMin;
+        qEndH = Settings::Instance().Get().quietPeriods[0].endHour;
+        qEndM = Settings::Instance().Get().quietPeriods[0].endMin;
+    }
 
     auto* timeRow = new QHBoxLayout();
     timeRow->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"reminders.quiet_start", L"من:"))));
-    m_timeQuietStart = new QTimeEdit(QTime(Settings::Instance().Get().quietStartHour, Settings::Instance().Get().quietStartMinute));
+    m_timeQuietStart = new QTimeEdit(QTime(qStartH, qStartM));
     timeRow->addWidget(m_timeQuietStart);
     timeRow->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"reminders.quiet_end", L"إلى:"))));
-    m_timeQuietEnd = new QTimeEdit(QTime(Settings::Instance().Get().quietEndHour, Settings::Instance().Get().quietEndMinute));
+    m_timeQuietEnd = new QTimeEdit(QTime(qEndH, qEndM));
     timeRow->addWidget(m_timeQuietEnd);
     timeRow->addStretch();
 
-    connect(m_chkQuietHours, &QCheckBox::toggled, this, [](bool checked) {
-        Settings::Instance().Get().quietHoursEnabled = checked;
+    connect(m_chkQuietHours, &QCheckBox::toggled, this, [this](bool checked) {
+        auto& s = Settings::Instance().Get();
+        s.quietPeriods.clear();
+        if (checked) {
+            QuietPeriod qp;
+            qp.startHour = m_timeQuietStart->time().hour();
+            qp.startMin = m_timeQuietStart->time().minute();
+            qp.endHour = m_timeQuietEnd->time().hour();
+            qp.endMin = m_timeQuietEnd->time().minute();
+            s.quietPeriods.push_back(qp);
+        }
         Settings::Instance().Save();
         Scheduler::Instance().Recalculate();
     });
@@ -279,9 +300,9 @@ QWidget* MainWindow::CreateRemindersPage() {
     volRow->addWidget(new QLabel(QString::fromStdWString(Localization::Instance().Get(L"reminders.volume", L"مستوى الصوت:"))));
     m_sliderVolume = new QSlider(Qt::Horizontal);
     m_sliderVolume->setRange(0, 100);
-    m_sliderVolume->setValue(Settings::Instance().Get().volumePercent);
+    m_sliderVolume->setValue(Settings::Instance().Get().soundVolume);
     connect(m_sliderVolume, &QSlider::valueChanged, this, [this](int val) {
-        Settings::Instance().Get().volumePercent = val;
+        Settings::Instance().Get().soundVolume = val;
         Settings::Instance().Save();
     });
     auto* btnTestAudio = new QPushButton(QString::fromStdWString(Localization::Instance().Get(L"reminders.test_audio", L"تجربة النغمة")));
@@ -293,9 +314,9 @@ QWidget* MainWindow::CreateRemindersPage() {
     volRow->addWidget(btnTestAudio);
 
     m_chkSuppressFullscreen = new QCheckBox(QString::fromStdWString(Localization::Instance().Get(L"reminders.fullscreen", L"إيقاف التذكيرات تلقائياً أثناء وضع ملء الشاشة (الألعاب والعروض)")));
-    m_chkSuppressFullscreen->setChecked(Settings::Instance().Get().suppressFullscreen);
+    m_chkSuppressFullscreen->setChecked(Settings::Instance().Get().suppressDuringFullscreen);
     connect(m_chkSuppressFullscreen, &QCheckBox::toggled, this, [](bool checked) {
-        Settings::Instance().Get().suppressFullscreen = checked;
+        Settings::Instance().Get().suppressDuringFullscreen = checked;
         Settings::Instance().Save();
     });
 
@@ -545,7 +566,7 @@ void MainWindow::RefreshDashboardStats() {
 
 void MainWindow::TriggerReminder() {
     // Check fullscreen suppression
-    if (Settings::Instance().Get().suppressFullscreen && m_fsDetector) {
+    if (Settings::Instance().Get().suppressDuringFullscreen && m_fsDetector) {
         if (m_fsDetector->IsFullScreenActive()) {
             LOG_INFO("Reminder suppressed due to active fullscreen application");
             return;
