@@ -138,7 +138,8 @@ set(ALL_SOURCES
     DhikrReminder.rc
 )
 
-# ─── Executable ───────────────────────────────────────────────────────────
+# ─── Windows Native Executable (Direct2D / Win32) ─────────────────────────
+if(WIN32)
 add_executable(AzkarReminder WIN32 ${ALL_SOURCES})
 
 target_include_directories(AzkarReminder PRIVATE
@@ -197,6 +198,7 @@ install(TARGETS AzkarReminder
 install(DIRECTORY assets/audio
     DESTINATION bin
 )
+endif()
 
 # ─── Qt 6 Frontend Target (Linux, macOS, and optional Windows) ─────────────
 option(BUILD_QT_APP "Build Qt 6 cross-platform frontend" OFF)
