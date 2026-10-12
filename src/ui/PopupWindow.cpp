@@ -545,9 +545,11 @@ RECT PopupWindow::CalculatePositionForWorkArea(int w, int h, const RECT& work) {
         default:                           x = work.left  + (pw - w) / 2; y = work.top  + margin; break;
     }
 
-    // Clamp to monitor work area
-    x = std::clamp(x, static_cast<int>(work.left), static_cast<int>(work.right  - w));
-    y = std::clamp(y, static_cast<int>(work.top),  static_cast<int>(work.bottom - h));
+    // Clamp to monitor work area safely
+    int maxX = std::max(static_cast<int>(work.left), static_cast<int>(work.right  - w));
+    int maxY = std::max(static_cast<int>(work.top),  static_cast<int>(work.bottom - h));
+    x = std::clamp(x, static_cast<int>(work.left), maxX);
+    y = std::clamp(y, static_cast<int>(work.top),  maxY);
 
     return { x, y, x + w, y + h };
 }

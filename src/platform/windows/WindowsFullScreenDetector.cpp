@@ -54,6 +54,19 @@ FullScreenState WindowsFullScreenDetector::CheckFullScreen() {
         }
     }
 
+    // Normal maximized windows are not full-screen distractions
+    if (IsZoomed(fg)) {
+        return FullScreenState::NotFullScreen;
+    }
+
+    LONG style = GetWindowLongW(fg, GWL_STYLE);
+    if (style & WS_MAXIMIZE) {
+        return FullScreenState::NotFullScreen;
+    }
+    if ((style & WS_THICKFRAME) && !(style & WS_POPUP)) {
+        return FullScreenState::NotFullScreen;
+    }
+
     // Check bounds against monitor
     HMONITOR hMon = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
     if (!hMon) return FullScreenState::NotFullScreen;
@@ -70,7 +83,6 @@ FullScreenState WindowsFullScreenDetector::CheckFullScreen() {
     LONG mh = mi.rcMonitor.bottom - mi.rcMonitor.top;
 
     if (w >= mw && h >= mh) {
-        LONG style = GetWindowLongW(fg, GWL_STYLE);
         // Exclude standard overlapping windows with titlebars/resizing frames
         if (!(style & WS_CAPTION)) {
             return FullScreenState::FullScreen;

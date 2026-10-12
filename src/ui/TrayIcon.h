@@ -31,6 +31,8 @@ public:
     // Update dynamic accent color icon
     void UpdateIcon(ColorTheme themeOverride = static_cast<ColorTheme>(-1));
 
+    bool IsCreated() const { return m_created; }
+
     TrayIcon(const TrayIcon&) = delete;
     TrayIcon& operator=(const TrayIcon&) = delete;
 

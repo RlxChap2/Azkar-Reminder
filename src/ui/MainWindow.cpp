@@ -32,8 +32,16 @@
 namespace dhikr {
 
 #define TIMER_FULLSCREEN_RESUME 1002
+#define TIMER_TRAY_RETRY        1003
 
-
+static std::string WStringToUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    int sz = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    if (sz <= 0) return {};
+    std::string s(sz, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), sz, nullptr, nullptr);
+    return s;
+}
 
 static std::wstring GetNavLabel(int i) {
     const wchar_t* keys[] = {
@@ -712,19 +720,28 @@ LRESULT MainWindow::OnReminder(bool forcePreview) {
     if (item) {
         // Fullscreen distraction protection check
         if (Settings::Instance().Get().suppressDuringFullscreen && FullScreenDetector::Instance().IsFullScreenActive()) {
+            HWND fg = GetForegroundWindow();
+            wchar_t fgTitle[128] = { 0 };
+            wchar_t fgClass[64]  = { 0 };
+            if (fg) {
+                GetWindowTextW(fg, fgTitle, 128);
+                GetClassNameW(fg, fgClass, 64);
+            }
+            std::string fgInfo = "FG: '" + WStringToUtf8(fgTitle) + "' [" + WStringToUtf8(fgClass) + "]";
+
             int mode = Settings::Instance().Get().fullscreenSuppressionMode;
             if (mode == 2) {
                 // Windows notification only
-                LOG_INFO("[FULLSCREEN] Fullscreen active — delivering via quiet Windows notification");
+                LOG_INFO("[FULLSCREEN] Fullscreen active (" + fgInfo + ") — delivering via quiet notification");
                 TrayIcon::Instance().ShowBalloon(ApplicationMetadata::AppName, item->text, NIIF_INFO);
                 return 0;
             } else if (mode == 1) {
                 // Suppress completely
-                LOG_INFO("[FULLSCREEN] Fullscreen active — reminder suppressed");
+                LOG_INFO("[FULLSCREEN] Fullscreen active (" + fgInfo + ") — reminder suppressed");
                 return 0;
             } else {
                 // Queue until fullscreen ends (Default)
-                LOG_INFO("[FULLSCREEN] Fullscreen active — queuing reminder until fullscreen ends");
+                LOG_INFO("[FULLSCREEN] Fullscreen active (" + fgInfo + ") — queuing reminder until fullscreen ends");
                 m_pendingFullscreenReminder = item;
                 SetTimer(m_hwnd, TIMER_FULLSCREEN_RESUME, 2000, nullptr);
                 return 0;
@@ -907,6 +924,15 @@ LRESULT MainWindow::OnTimer(UINT_PTR timerId) {
         }
         return 0;
     }
+    if (timerId == TIMER_TRAY_RETRY) {
+        if (TrayIcon::Instance().IsCreated()) {
+            KillTimer(m_hwnd, TIMER_TRAY_RETRY);
+        } else if (TrayIcon::Instance().Create(m_hwnd, m_hInst)) {
+            KillTimer(m_hwnd, TIMER_TRAY_RETRY);
+            LOG_INFO("Tray icon successfully initialized via retry timer");
+        }
+        return 0;
+    }
     return 0;
 }
 
@@ -1024,6 +1050,13 @@ LRESULT MainWindow::OnGetMinMaxInfo(MINMAXINFO* mmi) {
 
 LRESULT MainWindow::OnClose() {
     LOG_INFO("MainWindow::OnClose called");
+    if (!TrayIcon::Instance().IsCreated()) {
+        if (!TrayIcon::Instance().Create(m_hwnd, m_hInst)) {
+            LOG_WARN("Tray icon not available on close — minimizing window to taskbar");
+            ShowWindow(m_hwnd, SW_MINIMIZE);
+            return 0;
+        }
+    }
     // Hide to tray instead of closing
     Hide();
     return 0;
@@ -1032,6 +1065,7 @@ LRESULT MainWindow::OnClose() {
 LRESULT MainWindow::OnDestroy() {
     LOG_INFO("MainWindow::OnDestroy called");
     KillTimer(m_hwnd, TIMER_FULLSCREEN_RESUME);
+    KillTimer(m_hwnd, TIMER_TRAY_RETRY);
     m_pendingFullscreenReminder = nullptr;
     PostQuitMessage(0);
     return 0;

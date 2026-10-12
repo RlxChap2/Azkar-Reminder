@@ -218,8 +218,10 @@ int Application::Run() {
         SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
     }
 
-    // Create tray icon
-    TrayIcon::Instance().Create(m_mainHwnd, m_hInstance);
+    // Create tray icon (and start retry timer if Shell is not ready yet)
+    if (!TrayIcon::Instance().Create(m_mainHwnd, m_hInstance)) {
+        SetTimer(m_mainHwnd, 1003 /* TIMER_TRAY_RETRY */, 3000, nullptr);
+    }
 
     // Start scheduler — it posts WM_REMINDER_TRIGGER to main window
     Scheduler::Instance().Start(m_mainHwnd);

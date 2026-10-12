@@ -50,6 +50,22 @@ bool FullScreenDetector::IsFullScreenActive() const {
         }
     }
 
+    // A maximized desktop window is NOT a full-screen application.
+    // Users actively browse the web, write code, or read in maximized apps.
+    if (IsZoomed(fg)) {
+        return false;
+    }
+
+    LONG style = GetWindowLongW(fg, GWL_STYLE);
+    if (style & WS_MAXIMIZE) {
+        return false;
+    }
+
+    // Resizable overlapping windows with thick resizing borders are regular desktop apps
+    if ((style & WS_THICKFRAME) && !(style & WS_POPUP)) {
+        return false;
+    }
+
     // Check if the foreground window bounds completely cover its monitor
     HMONITOR hMon = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
     if (!hMon) return false;
@@ -71,8 +87,6 @@ bool FullScreenDetector::IsFullScreenActive() const {
 
     // Distinguish true fullscreen / borderless applications from normal maximized windows
     // (e.g. on systems with auto-hidden taskbars)
-    LONG style = GetWindowLongW(fg, GWL_STYLE);
-
     if ((style & WS_CAPTION) == WS_CAPTION) {
         POINT ptTopLeft = { 0, 0 };
         ClientToScreen(fg, &ptTopLeft);

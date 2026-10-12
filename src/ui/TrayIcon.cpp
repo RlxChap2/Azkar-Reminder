@@ -69,7 +69,7 @@ bool TrayIcon::Create(HWND hwndParent, HINSTANCE hInstance) {
 
     if (!ok) {
         DWORD err = GetLastError();
-        LOG_ERROR("Failed to create tray icon (Shell_NotifyIconW NIM_ADD failed, error=" + std::to_string(err) + ")");
+        LOG_WARN("Could not initialize tray icon yet (Explorer shell tray may not be ready, error=" + std::to_string(err) + ")");
         return false;
     }
 
