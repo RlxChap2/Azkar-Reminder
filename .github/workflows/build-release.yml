@@ -119,17 +119,7 @@ jobs:
         fi
 
         # ── 2. Desktop entry (required by linuxdeployqt) ──────────────────────
-        cat > AppDir/usr/share/applications/azkar-reminder.desktop << 'DESKTOP_EOF'
-[Desktop Entry]
-Type=Application
-Name=Azkar Reminder
-Exec=azkar_reminder
-Icon=azkar-reminder
-Categories=Utility;Clock;Qt;
-Terminal=false
-DESKTOP_EOF
-
-        # Also place at AppDir root (required by appimagetool)
+        printf '[Desktop Entry]\nType=Application\nName=Azkar Reminder\nExec=azkar_reminder\nIcon=azkar-reminder\nCategories=Utility;Clock;Qt;\nTerminal=false\n' > AppDir/usr/share/applications/azkar-reminder.desktop
         cp AppDir/usr/share/applications/azkar-reminder.desktop AppDir/azkar-reminder.desktop
 
         # ── 3. Download linuxdeployqt ─────────────────────────────────────────
@@ -162,15 +152,7 @@ DESKTOP_EOF
           }
 
         # ── 5. AppRun launcher ────────────────────────────────────────────────
-        cat > AppDir/AppRun << 'APPRUN_EOF'
-#!/bin/sh
-HERE="$(dirname "$(readlink -f "${0}")")"
-export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-export QT_PLUGIN_PATH="${HERE}/usr/plugins:${HERE}/usr/lib/qt6/plugins"
-export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-export PATH="${HERE}/usr/bin:${PATH}"
-exec "${HERE}/usr/bin/azkar_reminder" "$@"
-APPRUN_EOF
+        printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"\nexport QT_PLUGIN_PATH="${HERE}/usr/plugins:${HERE}/usr/lib/qt6/plugins"\nexport XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"\nexport PATH="${HERE}/usr/bin:${PATH}"\nexec "${HERE}/usr/bin/azkar_reminder" "$@"\n' > AppDir/AppRun
         chmod +x AppDir/AppRun
 
         # ── 6. Pack into AppImage ─────────────────────────────────────────────
@@ -401,4 +383,3 @@ APPRUN_EOF
           AzkarReminder-macOS-DMG/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
