@@ -48,7 +48,7 @@ jobs:
         path: release/*.exe
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 2. LINUX BUILD (Qt 6 + AppImage)
+  # 2. LINUX BUILD (Qt 6 + AppImage with bundled Qt libraries)
   # ─────────────────────────────────────────────────────────────────────────────
   build-linux:
     name: Linux (x86_64 AppImage)
@@ -66,10 +66,23 @@ jobs:
           ninja-build \
           qt6-base-dev \
           qt6-base-dev-tools \
+          qt6-wayland \
           libgl1-mesa-dev \
           libasound2-dev \
           libpulse-dev \
-          libx11-dev
+          libx11-dev \
+          libxcb-xinerama0-dev \
+          libxcb-icccm4-dev \
+          libxcb-image0-dev \
+          libxcb-keysyms1-dev \
+          libxcb-randr0-dev \
+          libxcb-render-util0-dev \
+          libxcb-shape0-dev \
+          libxcb-xfixes0-dev \
+          libxkbcommon-dev \
+          libxkbcommon-x11-dev \
+          fuse \
+          file
 
     - name: Configure CMake
       run: |
@@ -83,55 +96,92 @@ jobs:
     - name: Run Core Unit Tests
       run: ./build/azkar_core_tests
 
-    - name: Package AppImage Structure
+    - name: Package AppImage with bundled Qt (linuxdeployqt)
       run: |
+        # ── 1. Prepare AppDir structure ───────────────────────────────────────
         mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/lib
+        mkdir -p AppDir/usr/share/applications
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         mkdir -p AppDir/usr/share/azkar-reminder/audio
         mkdir -p AppDir/usr/share/azkar-reminder/fonts
-        
+
         cp build/azkar_reminder AppDir/usr/bin/
-        if [ -f assets/content.md ]; then
-          cp assets/content.md AppDir/usr/share/azkar-reminder/
-        fi
-        if [ -f assets/audio/diode_matrix.mp3 ]; then
-          cp assets/audio/diode_matrix.mp3 AppDir/usr/share/azkar-reminder/audio/
-        fi
-        if [ -f assets/fonts/Cairo-Regular.ttf ]; then
-          cp assets/fonts/Cairo-Regular.ttf AppDir/usr/share/azkar-reminder/fonts/
-        fi
-        
+
+        [ -f assets/content.md ]              && cp assets/content.md              AppDir/usr/share/azkar-reminder/
+        [ -f assets/audio/diode_matrix.mp3 ]  && cp assets/audio/diode_matrix.mp3  AppDir/usr/share/azkar-reminder/audio/
+        [ -f assets/fonts/Cairo-Regular.ttf ] && cp assets/fonts/Cairo-Regular.ttf AppDir/usr/share/azkar-reminder/fonts/
+
         if [ -f assets/images/logo.png ]; then
           cp assets/images/logo.png AppDir/azkar-reminder.png
           cp assets/images/logo.png AppDir/.DirIcon
           cp assets/images/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/azkar-reminder.png
         fi
 
-        # Create Desktop Entry
-        cat <<EOF > AppDir/azkar-reminder.desktop
-        [Desktop Entry]
-        Type=Application
-        Name=Azkar Reminder
-        Exec=azkar_reminder
-        Icon=azkar-reminder
-        Categories=Utility;Clock;Qt;
-        Terminal=false
-        EOF
-        
-        # Create AppRun launcher
-        cat <<'EOF' > AppDir/AppRun
-        #!/bin/sh
-        HERE="$(dirname "$(readlink -f "${0}")")"
-        export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-        export PATH="${HERE}/usr/bin:${PATH}"
-        exec "${HERE}/usr/bin/azkar_reminder" "$@"
-        EOF
+        # ── 2. Desktop entry (required by linuxdeployqt) ──────────────────────
+        cat > AppDir/usr/share/applications/azkar-reminder.desktop << 'DESKTOP_EOF'
+[Desktop Entry]
+Type=Application
+Name=Azkar Reminder
+Exec=azkar_reminder
+Icon=azkar-reminder
+Categories=Utility;Clock;Qt;
+Terminal=false
+DESKTOP_EOF
+
+        # Also place at AppDir root (required by appimagetool)
+        cp AppDir/usr/share/applications/azkar-reminder.desktop AppDir/azkar-reminder.desktop
+
+        # ── 3. Download linuxdeployqt ─────────────────────────────────────────
+        echo "Downloading linuxdeployqt..."
+        wget -q "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage" \
+          -O linuxdeployqt
+        chmod +x linuxdeployqt
+
+        # ── 4. Run linuxdeployqt to bundle Qt libraries ───────────────────────
+        export QMAKE=$(which qmake6 2>/dev/null || which qmake)
+        echo "Using qmake at: $QMAKE"
+
+        ./linuxdeployqt --appimage-extract-and-run \
+          AppDir/usr/share/applications/azkar-reminder.desktop \
+          -qmake="$QMAKE" \
+          -bundle-non-qt-libs \
+          -no-strip \
+          -verbose=1 \
+          -unsupported-allow-new-glibc || {
+            echo "WARNING: linuxdeployqt returned non-zero — falling back to manual Qt copy"
+            QT_LIB_DIR=$(dirname "$(find /usr/lib -name 'libQt6Core.so*' 2>/dev/null | head -1)")
+            echo "Qt lib dir: $QT_LIB_DIR"
+            for lib in libQt6Core libQt6Gui libQt6Widgets libQt6DBus libQt6XcbQpa libQt6Network; do
+              find "$QT_LIB_DIR" -name "${lib}.so*" -exec cp -Pv {} AppDir/usr/lib/ \; 2>/dev/null || true
+            done
+            QT_PLUGINS_DIR=$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || echo "/usr/lib/x86_64-linux-gnu/qt6/plugins")
+            mkdir -p AppDir/usr/plugins/platforms AppDir/usr/plugins/imageformats
+            cp -rv "$QT_PLUGINS_DIR/platforms"/*.so    AppDir/usr/plugins/platforms/    2>/dev/null || true
+            cp -rv "$QT_PLUGINS_DIR/imageformats"/*.so AppDir/usr/plugins/imageformats/ 2>/dev/null || true
+          }
+
+        # ── 5. AppRun launcher ────────────────────────────────────────────────
+        cat > AppDir/AppRun << 'APPRUN_EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "${0}")")"
+export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+export QT_PLUGIN_PATH="${HERE}/usr/plugins:${HERE}/usr/lib/qt6/plugins"
+export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export PATH="${HERE}/usr/bin:${PATH}"
+exec "${HERE}/usr/bin/azkar_reminder" "$@"
+APPRUN_EOF
         chmod +x AppDir/AppRun
 
-        # Download appimagetool
-        wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+        # ── 6. Pack into AppImage ─────────────────────────────────────────────
+        echo "Downloading appimagetool..."
+        wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
+          -O appimagetool
         chmod +x appimagetool
         ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir AzkarReminder-x86_64.AppImage
+
+        echo "=== AppImage built successfully ==="
+        ls -lh AzkarReminder-x86_64.AppImage
 
     - name: Upload Linux AppImage
       uses: actions/upload-artifact@v4
@@ -152,7 +202,7 @@ jobs:
 
     - name: Install Qt 6 via Homebrew
       run: |
-        brew install qt@6 ninja create-dmg
+        brew install qt@6 ninja
         brew link --force qt@6
 
     - name: Configure CMake
@@ -168,61 +218,97 @@ jobs:
     - name: Run Core Unit Tests
       run: ./build/azkar_core_tests
 
+    - name: Debug — find built app bundles
+      run: |
+        echo "=== Contents of build/ ==="
+        ls -la build/
+        echo ""
+        echo "=== All .app bundles found ==="
+        find build -name "*.app" -maxdepth 4 -type d
+        echo ""
+        echo "=== All executables in build/ ==="
+        find build -maxdepth 3 -type f -perm +111 | head -20
+
     - name: Package macOS App Bundle into DMG
       run: |
-        APP_PATH="build/Azkar Reminder.app"
-        if [ ! -d "${APP_PATH}" ]; then
-          APP_PATH="build/azkar_reminder.app"
+        set -e  # Fail on any error
+
+        # ── 1. Locate the .app bundle (try multiple name variants) ────────────
+        APP_PATH=""
+        for candidate in \
+          "build/Azkar Reminder.app" \
+          "build/azkar_reminder.app" \
+          "build/AzkarReminder.app" \
+          "build/azkar-reminder.app"; do
+          if [ -d "${candidate}" ]; then
+            APP_PATH="${candidate}"
+            echo "Found app bundle at: ${APP_PATH}"
+            break
+          fi
+        done
+
+        if [ -z "${APP_PATH}" ]; then
+          echo "ERROR: No .app bundle found in build/! Listing build/ contents:"
+          find build -maxdepth 3
+          exit 1
         fi
-        
-        # 1. Create native macOS .icns icon from logo.png
+
+        # ── 2. Create native macOS .icns icon from logo.png ──────────────────
         if [ -f "assets/images/logo.png" ]; then
           mkdir -p azkar.iconset
-          sips -z 16 16     assets/images/logo.png --out azkar.iconset/icon_16x16.png
-          sips -z 32 32     assets/images/logo.png --out azkar.iconset/icon_16x16@2x.png
-          sips -z 32 32     assets/images/logo.png --out azkar.iconset/icon_32x32.png
-          sips -z 64 64     assets/images/logo.png --out azkar.iconset/icon_32x32@2x.png
-          sips -z 128 128   assets/images/logo.png --out azkar.iconset/icon_128x128.png
-          sips -z 256 256   assets/images/logo.png --out azkar.iconset/icon_128x128@2x.png
-          sips -z 256 256   assets/images/logo.png --out azkar.iconset/icon_256x256.png
-          sips -z 512 512   assets/images/logo.png --out azkar.iconset/icon_256x256@2x.png
-          sips -z 512 512   assets/images/logo.png --out azkar.iconset/icon_512x512.png
+          sips -z 16   16   assets/images/logo.png --out azkar.iconset/icon_16x16.png
+          sips -z 32   32   assets/images/logo.png --out azkar.iconset/icon_16x16@2x.png
+          sips -z 32   32   assets/images/logo.png --out azkar.iconset/icon_32x32.png
+          sips -z 64   64   assets/images/logo.png --out azkar.iconset/icon_32x32@2x.png
+          sips -z 128  128  assets/images/logo.png --out azkar.iconset/icon_128x128.png
+          sips -z 256  256  assets/images/logo.png --out azkar.iconset/icon_128x128@2x.png
+          sips -z 256  256  assets/images/logo.png --out azkar.iconset/icon_256x256.png
+          sips -z 512  512  assets/images/logo.png --out azkar.iconset/icon_256x256@2x.png
+          sips -z 512  512  assets/images/logo.png --out azkar.iconset/icon_512x512.png
           sips -z 1024 1024 assets/images/logo.png --out azkar.iconset/icon_512x512@2x.png
           mkdir -p "${APP_PATH}/Contents/Resources"
           iconutil -c icns azkar.iconset -o "${APP_PATH}/Contents/Resources/AzkarReminder.icns"
           rm -rf azkar.iconset
+          echo "Icon generated successfully"
         fi
 
-        # 2. Bundle resources
+        # ── 3. Bundle app resources ───────────────────────────────────────────
         mkdir -p "${APP_PATH}/Contents/Resources/audio"
         mkdir -p "${APP_PATH}/Contents/Resources/fonts"
-        if [ -f assets/content.md ]; then
-          cp assets/content.md "${APP_PATH}/Contents/Resources/"
-        fi
-        if [ -f assets/audio/diode_matrix.mp3 ]; then
-          cp assets/audio/diode_matrix.mp3 "${APP_PATH}/Contents/Resources/audio/"
-        fi
-        if [ -f assets/fonts/Cairo-Regular.ttf ]; then
-          cp assets/fonts/Cairo-Regular.ttf "${APP_PATH}/Contents/Resources/fonts/"
-        fi
+        [ -f assets/content.md ]              && cp assets/content.md              "${APP_PATH}/Contents/Resources/"
+        [ -f assets/audio/diode_matrix.mp3 ]  && cp assets/audio/diode_matrix.mp3  "${APP_PATH}/Contents/Resources/audio/"
+        [ -f assets/fonts/Cairo-Regular.ttf ] && cp assets/fonts/Cairo-Regular.ttf "${APP_PATH}/Contents/Resources/fonts/"
 
-        # 3. Deploy Qt dependencies into bundle
-        macdeployqt "${APP_PATH}" -verbose=1 || true
+        # ── 4. Deploy Qt dependencies into bundle ─────────────────────────────
+        echo "Running macdeployqt on: ${APP_PATH}"
+        macdeployqt "${APP_PATH}" -verbose=2
+        echo "macdeployqt completed successfully"
 
-        # 4. Ad-hoc Code Sign inside-out (REQUIRED to prevent macOS 'damaged and can't be opened' error)
-        find "${APP_PATH}/Contents/Frameworks" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
-        find "${APP_PATH}/Contents/Frameworks" -type d -name "*.framework" -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
-        find "${APP_PATH}/Contents/PlugIns" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+        # ── 5. Ad-hoc Code Sign (prevents 'damaged and can't be opened' error) ─
+        echo "Ad-hoc signing all dylibs and frameworks..."
+        find "${APP_PATH}/Contents/Frameworks" -type f \( -name "*.dylib" -o -name "*.so" \) \
+          -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+        find "${APP_PATH}/Contents/Frameworks" -type d -name "*.framework" \
+          -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+        find "${APP_PATH}/Contents/PlugIns" -type f \( -name "*.dylib" -o -name "*.so" \) \
+          -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
         codesign --force --deep --verify --verbose --sign - "${APP_PATH}"
+        echo "Code signing complete"
 
-        # 5. Build clean DMG with /Applications symlink
+        # ── 6. Build DMG with /Applications symlink ───────────────────────────
         mkdir -p dmg_staging
         cp -R "${APP_PATH}" "dmg_staging/Azkar Reminder.app"
         ln -s /Applications dmg_staging/Applications
-        
-        # Create standard UDZO DMG
-        hdiutil create -volname "Azkar Reminder" -srcfolder dmg_staging -ov -format UDZO "AzkarReminder-macOS.dmg"
+
+        hdiutil create \
+          -volname "Azkar Reminder" \
+          -srcfolder dmg_staging \
+          -ov -format UDZO \
+          "AzkarReminder-macOS.dmg"
         rm -rf dmg_staging
+
+        echo "=== DMG built successfully ==="
+        ls -lh AzkarReminder-macOS.dmg
 
     - name: Upload macOS DMG
       uses: actions/upload-artifact@v4
@@ -245,12 +331,31 @@ jobs:
     - name: Download all build artifacts
       uses: actions/download-artifact@v4
 
-    - name: Create Private Draft GitHub Release
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         draft: true
-        prerelease: true
-        name: "Azkar Reminder v1.2.0 (Private Preview)"
+        prerelease: false
+        name: "Azkar Reminder ${{ github.ref_name }}"
+        body: |
+          ## Azkar Reminder ${{ github.ref_name }}
+
+          ### Downloads
+          | Platform | File |
+          |----------|------|
+          | 🪟 Windows | `AzkarReminderSetup.exe` |
+          | 🐧 Linux   | `AzkarReminder-x86_64.AppImage` |
+          | 🍎 macOS   | `AzkarReminder-macOS.dmg` |
+
+          ### macOS Installation Note
+          After downloading the DMG, if macOS shows a security warning:
+          1. Open **System Preferences → Privacy & Security**
+          2. Scroll down and click **"Open Anyway"**
+
+          Or run in Terminal:
+          ```
+          xattr -dr com.apple.quarantine /Applications/"Azkar Reminder.app"
+          ```
         files: |
           AzkarReminder-Windows-Setup/*
           AzkarReminder-Linux-AppImage/*

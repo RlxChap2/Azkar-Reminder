@@ -19,7 +19,7 @@
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Azkar Reminder");
-    app.setApplicationVersion("1.2.0");
+    app.setApplicationVersion("1.2.2");
     app.setOrganizationName("Azkar");
     app.setQuitOnLastWindowClosed(false);
 
@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
     // 1. Initialize Directories & Logging
     dhikr::PlatformPaths::EnsureDirectoriesExist();
     dhikr::Logger::Instance().Initialize(dhikr::PlatformPaths::GetLogsDir());
-    LOG_INFO("Starting Azkar Reminder v1.2.0 (Qt 6 Cross-Platform)");
+    LOG_INFO("Starting Azkar Reminder v1.2.2 (Qt 6 Cross-Platform)");
 
     // 1.5 Load bundled Cairo Arabic font if present
     QString appDir = QCoreApplication::applicationDirPath();
