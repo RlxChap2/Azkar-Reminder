@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle identity -->
+    <key>CFBundleName</key>
+    <string>Azkar Reminder</string>
+    <key>CFBundleDisplayName</key>
+    <string>Azkar Reminder</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.azkar.reminder</string>
+    <key>CFBundleVersion</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleExecutable</key>
+    <string>Azkar Reminder</string>
+
+    <!-- Icon -->
+    <key>CFBundleIconFile</key>
+    <string>AzkarReminder.icns</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         CRITICAL: LSUIElement = 1
+         Makes the app a "background-only" / "agent" app:
+         - No Dock icon shown
+         - No app menu bar entry
+         - Works purely as a system tray (NSStatusItem) app
+         Without this, macOS treats it as a normal GUI app and when
+         the main window is hidden, the app appears to do nothing.
+    ═══════════════════════════════════════════════════════════════ -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Prevent multiple instances -->
+    <key>LSMultipleInstancesProhibited</key>
+    <true/>
+
+    <!-- macOS minimum version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+
+    <!-- Supported platforms -->
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+
+    <!-- Allow high-resolution Retina display -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- Privacy: this app does NOT access camera/mic/location -->
+    <key>NSCameraUsageDescription</key>
+    <string></string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string></string>
+
+    <!-- Allow app to run in background (needed for reminder scheduler) -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+    </dict>
+
+    <!-- Background modes: none needed since we use NSStatusItem + timer -->
+
+    <!-- Copyright -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Ahmed Mohamed Kamel. All rights reserved.</string>
+</dict>
+</plist>

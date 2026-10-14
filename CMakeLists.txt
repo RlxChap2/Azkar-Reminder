@@ -264,9 +264,10 @@ if(BUILD_QT_APP)
                 MACOSX_BUNDLE TRUE
                 MACOSX_BUNDLE_BUNDLE_NAME "Azkar Reminder"
                 MACOSX_BUNDLE_GUI_IDENTIFIER "com.azkar.reminder"
-                MACOSX_BUNDLE_BUNDLE_VERSION "1.2.1"
-                MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.1"
+                MACOSX_BUNDLE_BUNDLE_VERSION "1.2.2"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.2"
                 MACOSX_BUNDLE_ICON_FILE "AzkarReminder.icns"
+                MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/assets/Info.plist.in"
             )
         endif()
         message(STATUS "Qt 6 frontend target 'azkar_reminder' enabled")

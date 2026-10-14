@@ -340,25 +340,65 @@ APPRUN_EOF
         body: |
           ## Azkar Reminder ${{ github.ref_name }}
 
-          ### Downloads
-          | Platform | File |
-          |----------|------|
-          | 🪟 Windows | `AzkarReminderSetup.exe` |
-          | 🐧 Linux   | `AzkarReminder-x86_64.AppImage` |
-          | 🍎 macOS   | `AzkarReminder-macOS.dmg` |
+          > بسم الله الرحمن الرحيم — تطبيق مكتب سطح مكتب هادئ وعصري للتذكير بالأذكار اليومية
 
-          ### macOS Installation Note
-          After downloading the DMG, if macOS shows a security warning:
-          1. Open **System Preferences → Privacy & Security**
-          2. Scroll down and click **"Open Anyway"**
+          ### 📥 روابط التثبيت المباشر
 
-          Or run in Terminal:
+          | Platform | File | Size |
+          |----------|------|------|
+          | 🪟 **Windows** (10/11) | `AzkarReminderSetup.exe` | ~38 MB |
+          | 🐧 **Linux** (Ubuntu, Fedora, Arch, etc.) | `AzkarReminder-x86_64.AppImage` | ~60 MB |
+          | 🍎 **macOS** (Apple Silicon & Intel, macOS 11+) | `AzkarReminder-macOS.dmg` | ~38 MB |
+
+          ---
+
+          ### 🍎 macOS — خطوات التثبيت
+
+          > ⚠️ **مهم**: macOS يحتاج خطوة إضافية بعد التحميل بسبب نظام الحماية Gatekeeper
+
+          1. حمّل `AzkarReminder-macOS.dmg`
+          2. افتح الـ DMG واسحب `Azkar Reminder.app` لـ `/Applications`
+          3. **لا تفتح التطبيق مباشرة بعد التثبيت** — بدل كده افتح **Terminal** واكتب:
+
+          ```bash
+          xattr -dr com.apple.quarantine "/Applications/Azkar Reminder.app"
           ```
-          xattr -dr com.apple.quarantine /Applications/"Azkar Reminder.app"
+
+          4. دلوقتي افتح التطبيق عادي من Launchpad أو `/Applications`
+
+          > **بديل**: لو ظهرت رسالة "damaged and can't be opened":
+          > اضغط **Cancel**، روح لـ **System Settings → Privacy & Security** وانزل لـ "Security" وهتلاقي زرار **Open Anyway**
+
+          ---
+
+          ### 🐧 Linux — خطوات التثبيت
+
+          1. حمّل `AzkarReminder-x86_64.AppImage`
+          2. خلّيه executable:
+          ```bash
+          chmod +x AzkarReminder-x86_64.AppImage
           ```
+          3. شغّله:
+          ```bash
+          ./AzkarReminder-x86_64.AppImage
+          ```
+
+          > **ملاحظة**: لو ظهر error عن FUSE:
+          ```bash
+          ./AzkarReminder-x86_64.AppImage --appimage-extract-and-run
+          ```
+
+          ---
+
+          ### 🪟 Windows — خطوات التثبيت
+
+          1. حمّل `AzkarReminderSetup.exe`
+          2. شغّل الـ installer وابع التعليمات
+          3. البرنامج هيشتغل في system tray تلقائياً
         files: |
           AzkarReminder-Windows-Setup/*
           AzkarReminder-Linux-AppImage/*
           AzkarReminder-macOS-DMG/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
