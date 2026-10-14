@@ -170,12 +170,30 @@ jobs:
 
     - name: Package macOS App Bundle into DMG
       run: |
-        if [ -d "build/azkar_reminder.app" ]; then
+        APP_PATH="build/Azkar Reminder.app"
+        if [ ! -d "${APP_PATH}" ]; then
           APP_PATH="build/azkar_reminder.app"
-        else
-          APP_PATH="build/Azkar Reminder.app"
         fi
         
+        # 1. Create native macOS .icns icon from logo.png
+        if [ -f "assets/images/logo.png" ]; then
+          mkdir -p azkar.iconset
+          sips -z 16 16     assets/images/logo.png --out azkar.iconset/icon_16x16.png
+          sips -z 32 32     assets/images/logo.png --out azkar.iconset/icon_16x16@2x.png
+          sips -z 32 32     assets/images/logo.png --out azkar.iconset/icon_32x32.png
+          sips -z 64 64     assets/images/logo.png --out azkar.iconset/icon_32x32@2x.png
+          sips -z 128 128   assets/images/logo.png --out azkar.iconset/icon_128x128.png
+          sips -z 256 256   assets/images/logo.png --out azkar.iconset/icon_128x128@2x.png
+          sips -z 256 256   assets/images/logo.png --out azkar.iconset/icon_256x256.png
+          sips -z 512 512   assets/images/logo.png --out azkar.iconset/icon_256x256@2x.png
+          sips -z 512 512   assets/images/logo.png --out azkar.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/images/logo.png --out azkar.iconset/icon_512x512@2x.png
+          mkdir -p "${APP_PATH}/Contents/Resources"
+          iconutil -c icns azkar.iconset -o "${APP_PATH}/Contents/Resources/AzkarReminder.icns"
+          rm -rf azkar.iconset
+        fi
+
+        # 2. Bundle resources
         mkdir -p "${APP_PATH}/Contents/Resources/audio"
         mkdir -p "${APP_PATH}/Contents/Resources/fonts"
         if [ -f assets/content.md ]; then
@@ -188,19 +206,29 @@ jobs:
           cp assets/fonts/Cairo-Regular.ttf "${APP_PATH}/Contents/Resources/fonts/"
         fi
 
-        # Deploy Qt dependencies into bundle
-        macdeployqt "${APP_PATH}" -dmg || true
+        # 3. Deploy Qt dependencies into bundle
+        macdeployqt "${APP_PATH}" -verbose=1 || true
+
+        # 4. Ad-hoc Code Sign inside-out (REQUIRED to prevent macOS 'damaged and can't be opened' error)
+        find "${APP_PATH}/Contents/Frameworks" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+        find "${APP_PATH}/Contents/Frameworks" -type d -name "*.framework" -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+        find "${APP_PATH}/Contents/PlugIns" -type f -name "*.dylib" -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+        codesign --force --deep --verify --verbose --sign - "${APP_PATH}"
+
+        # 5. Build clean DMG with /Applications symlink
+        mkdir -p dmg_staging
+        cp -R "${APP_PATH}" "dmg_staging/Azkar Reminder.app"
+        ln -s /Applications dmg_staging/Applications
         
-        # Fallback DMG creation if macdeployqt did not produce dmg
-        if [ ! -f "build/*.dmg" ]; then
-          hdiutil create -volname "Azkar Reminder" -srcfolder "${APP_PATH}" -ov -format UDZO "AzkarReminder-macOS.dmg"
-        fi
+        # Create standard UDZO DMG
+        hdiutil create -volname "Azkar Reminder" -srcfolder dmg_staging -ov -format UDZO "AzkarReminder-macOS.dmg"
+        rm -rf dmg_staging
 
     - name: Upload macOS DMG
       uses: actions/upload-artifact@v4
       with:
         name: AzkarReminder-macOS-DMG
-        path: "*.dmg"
+        path: "AzkarReminder-macOS.dmg"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 4. GITHUB RELEASE

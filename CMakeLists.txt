@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DhikrReminder VERSION 1.2.0 LANGUAGES CXX C)
+project(DhikrReminder VERSION 1.2.1 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -260,11 +260,13 @@ if(BUILD_QT_APP)
                 "-framework CoreAudio"
             )
             set_target_properties(azkar_reminder PROPERTIES
+                OUTPUT_NAME "Azkar Reminder"
                 MACOSX_BUNDLE TRUE
                 MACOSX_BUNDLE_BUNDLE_NAME "Azkar Reminder"
                 MACOSX_BUNDLE_GUI_IDENTIFIER "com.azkar.reminder"
-                MACOSX_BUNDLE_BUNDLE_VERSION "1.2.0"
-                MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.0"
+                MACOSX_BUNDLE_BUNDLE_VERSION "1.2.1"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.1"
+                MACOSX_BUNDLE_ICON_FILE "AzkarReminder.icns"
             )
         endif()
         message(STATUS "Qt 6 frontend target 'azkar_reminder' enabled")
