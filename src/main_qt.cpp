@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include <QMessageBox>
 #include <QLocale>
+#include <QTimer>
 #include "core/PlatformPaths.h"
 #include "core/Logger.h"
 #include "core/Settings.h"
@@ -43,14 +44,15 @@ int main(int argc, char* argv[]) {
         QLocalSocket socket;
         socket.connectToServer(QString::fromLatin1(serverName));
         if (!socket.waitForConnected(1500)) return 1;
-        socket.write(quit ? "quit\n" : background ? "background\n" : "show\n");
-        socket.waitForBytesWritten(1500);
-        return 0;
+        const QByteArray request = quit ? "quit\n" : background ? "background\n" : "show\n";
+        if (socket.write(request) != request.size()) return 1;
+        if (socket.bytesToWrite() && !socket.waitForBytesWritten(1500)) return 1;
+        if (!socket.canReadLine() && !socket.waitForReadyRead(1500)) return 1;
+        return socket.readLine().trimmed() == "ok" ? 0 : 1;
     }
     if (quit) return 0;
     QLocalServer::removeServer(QString::fromLatin1(serverName));
     QLocalServer server;
-    if (!server.listen(QString::fromLatin1(serverName))) return 1;
     dhikr::Logger::Instance().Initialize(dhikr::PlatformPaths::GetLogsDir());
     LOG_INFO(std::string("Starting Azkar Reminder ") + AZKAR_APP_VERSION);
     if (QFontDatabase::addApplicationFont(":/azkar/fonts/cairo.ttf") < 0) LOG_WARN("Bundled Cairo font could not be loaded");
@@ -83,9 +85,14 @@ int main(int argc, char* argv[]) {
             const auto readRequest = [socket, &window] {
                 if (!socket->canReadLine()) return;
                 const auto request = socket->readLine().trimmed();
-                if (request == "quit") QApplication::quit();
-                else if (request == "show") { window.showNormal(); window.raise(); window.activateWindow(); }
+                if (request != "quit" && request != "show" && request != "background") { socket->disconnectFromServer(); return; }
+                if (request == "show") { window.showNormal(); window.raise(); window.activateWindow(); }
+                socket->write("ok\n");
+                socket->flush();
                 socket->disconnectFromServer();
+                // quit() before app.exec() has no effect. Queue shutdown after
+                // acknowledging the request, including Cocoa startup events.
+                if (request == "quit") QTimer::singleShot(0, qApp, [] { QApplication::quit(); });
             };
             QObject::connect(socket, &QLocalSocket::readyRead, &window, readRequest);
             QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
@@ -96,6 +103,8 @@ int main(int argc, char* argv[]) {
     });
     tray.Show();
     if (!background || !tray.IsAvailable()) window.show();
+    // Publish readiness after construction and Cocoa window/tray startup.
+    if (!server.listen(QString::fromLatin1(serverName))) return 1;
     const int result = app.exec();
     dhikr::Scheduler::Instance().Stop();
     dhikr::Database::Instance().Close();

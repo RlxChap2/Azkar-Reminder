@@ -19,7 +19,7 @@ start() {
     process=$!
     for attempt in {1..30}; do
         if ! kill -0 "$process" 2>/dev/null; then cat "$task_directory/application.log"; return 1; fi
-        if [[ -f "$XDG_DATA_HOME/azkar-reminder/content.json" ]]; then sleep 1; return; fi
+        if [[ -f "$XDG_DATA_HOME/azkar-reminder/content.json" ]] && "$application" "${arguments[@]}" --background; then return; fi
         sleep 1
     done
     cat "$task_directory/application.log"
