@@ -60,5 +60,8 @@ if [[ "$suffix" == Universal ]]; then
     [[ "$(plutil -extract status raw "$stage/notary-dmg.json")" == Accepted ]]
     xcrun stapler staple "$artifact"
 fi
-shasum -a 256 "$artifact" > "$artifact.sha256"
+(
+    cd "$output"
+    shasum -a 256 "${artifact##*/}"
+) > "$artifact.sha256"
 printf 'Created %s\n' "$artifact"

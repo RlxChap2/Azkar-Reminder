@@ -19,6 +19,11 @@ cleanup() {
     rm -rf "$task_directory"
 }
 trap cleanup EXIT
+cp "$image" "$image.sha256" "$task_directory/"
+(
+    cd "$task_directory"
+    shasum -a 256 --check "$(basename "$image").sha256"
+)
 mkdir "$task_directory/mount"
 hdiutil attach "$image" -readonly -nobrowse -mountpoint "$task_directory/mount"
 mounted=true

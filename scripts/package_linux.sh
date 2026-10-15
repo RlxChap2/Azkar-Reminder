@@ -63,5 +63,8 @@ for library in "$stage"/usr/lib/*.so*; do
 done
 "$tools/linuxdeploy-x86_64.AppImage" --appdir "$stage" --output appimage
 test -s "$OUTPUT"
-sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+(
+    cd "$output"
+    sha256sum "${OUTPUT##*/}"
+) > "$OUTPUT.sha256"
 printf 'Created %s\n' "$OUTPUT"
