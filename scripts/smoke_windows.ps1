@@ -14,7 +14,9 @@ if ($PackageFullName) {
     if (!$PackageFamilyName) { throw 'Package family name is required.' }
     $data = Join-Path $env:LOCALAPPDATA "Packages/$PackageFamilyName/LocalCache/Local/Azkar Reminder"
 }
-if (Test-Path -LiteralPath $data) { throw 'Existing application data found.' }
+if (Test-Path -LiteralPath $data) {
+    if (Get-ChildItem -LiteralPath $data -File -Recurse -Force) { throw 'Existing application data found.' }
+}
 if (!('AzkarSmokeWindow' -as [type])) { Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -55,7 +57,7 @@ public static class AzkarSmokeWindow {
 }
 '@
 }
-New-Item -ItemType Directory -Path $data | Out-Null
+New-Item -ItemType Directory -Path $data -Force | Out-Null
 @{ firstLaunch = $false; startWithWindows = $false; remindersEnabled = $false; language = 'en' } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $data 'settings.json') -Encoding utf8
 $process = $null

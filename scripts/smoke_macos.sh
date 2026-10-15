@@ -5,7 +5,10 @@ set -euo pipefail
 image=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 task_directory=$(mktemp -d)
 config="$HOME/Library/Application Support/Azkar Reminder"
-[[ ! -e "$config" ]] || { echo 'Existing application data found.' >&2; exit 1; }
+if [[ -e "$config" && -n "$(find "$config" -type f -print -quit)" ]]; then
+    echo 'Existing application data found.' >&2
+    exit 1
+fi
 process=
 mounted=false
 cleanup() {
