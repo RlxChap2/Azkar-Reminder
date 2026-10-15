@@ -86,6 +86,7 @@ function Stop-Reminder {
 }
 try {
     $window = Start-Reminder
+    if (!(Test-Path -LiteralPath (Join-Path $data 'content.json'))) { throw 'Application did not use the expected data directory.' }
     if ([AzkarSmokeWindow]::IsWindowVisible($window)) { throw 'Background startup displayed the main window.' }
     $second = Start-Process -FilePath $Executable -PassThru
     $clients.Add($second)

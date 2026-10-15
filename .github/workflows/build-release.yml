@@ -46,6 +46,23 @@ jobs:
             release/*.msix*
           if-no-files-found: error
 
+  check-windows-qt:
+    name: Windows optional Qt frontend
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Qt SDK
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build both Windows frontends and run tests
+        run: |
+          cmake -S . -B build-qt -DBUILD_QT_APP=ON -DBUILD_TESTING=ON
+          cmake --build build-qt --config Release --parallel
+          ctest --test-dir build-qt -C Release --output-on-failure
+
   build-linux:
     name: Linux x86_64 AppImage
     runs-on: ubuntu-22.04
@@ -144,7 +161,7 @@ jobs:
 
   release:
     name: Create release draft
-    needs: [build-windows, build-linux, build-macos]
+    needs: [build-windows, check-windows-qt, build-linux, build-macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
