@@ -49,18 +49,24 @@ stop() {
         sleep 1
     done
     echo 'IPC quit did not stop the application.' >&2
+    cat "$task_directory/application.log" >&2
+    sample "$process" 1 1 -file "$task_directory/hang.txt" >/dev/null 2>&1 || true
+    if [[ -f "$task_directory/hang.txt" ]]; then head -100 "$task_directory/hang.txt" >&2; fi
     return 1
 }
+echo 'Testing native Cocoa startup and Launch Services.'
 start
 # Exercise Launch Services with the deployed bundle, then IPC show and quit.
 open -n -a "$app" --args --background
 "$binary"
 stop
+echo 'Testing an intentionally empty library.'
 printf '[]' > "$config/content.json"
 start
 stop
 [[ "$(cat "$config/content.json")" == '[]' ]]
 printf '{invalid' > "$config/content.json"
+echo 'Testing a malformed library.'
 set +e
 "$binary" --background
 status=$?
@@ -68,11 +74,13 @@ set -e
 [[ "$status" == 1 && "$(cat "$config/content.json")" == '{invalid' ]]
 printf '[]' > "$config/content.json"
 printf '{invalid-settings' > "$config/settings.json"
+echo 'Testing settings recovery.'
 start
 stop
 backup=$(find "$config" -name 'settings-invalid-*.json' -print -quit)
 [[ -n "$backup" && "$(cat "$backup")" == '{invalid-settings' ]]
 if [[ "$(uname -m)" == arm64 ]]; then
+    echo 'Testing the deployed x86_64 slice through Rosetta.'
     arch -x86_64 /usr/bin/true
     launch=(arch -x86_64 "$binary")
     start
