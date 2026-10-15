@@ -11,4 +11,10 @@
 - Added pinned Qt deployment packaging for Linux and a macOS universal/signing/notarization pipeline that fails on deployment errors.
 - Added regression, audio, UI and executable smoke tests. Updated build, privacy and remaining-work documentation without resource-use or antivirus guarantees.
 
-Linux validation was performed locally in Ubuntu VMs. Native Windows MSVC build and 23 core tests passed; unsigned MSIX packaging passed MakeAppx validation. macOS execution, installer tests and remote GitHub workflow execution remain pending. This entry does not record a published release.
+Package validation ran in Ubuntu VMs and GitHub-hosted Linux, Windows and macOS environments. Windows Setup installation/reinstallation/removal and a test-signed MSIX activation passed. The macOS DMG mounted and its deployed Cocoa app passed startup, IPC and library recovery checks. See `docs/BUILD_VALIDATION.md` for evidence and limits. This entry does not record a published release.
+
+- Fixed a scheduler state race exposed by macOS: a worker snapshot could overwrite a completed pause request.
+- Explicitly bundled HarfBuzz after a minimal Ubuntu container exposed the missing runtime library.
+- Fixed macOS `lipo` argument ordering and exercised the package smoke script with the system Bash.
+- Created the Windows startup registry key when needed and shut down native subsystems before static destruction.
+- Preserved malformed settings when backup fails, and acknowledged IPC requests only after UI startup is ready.

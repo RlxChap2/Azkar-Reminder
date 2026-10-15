@@ -13,8 +13,11 @@
 | النظام | الإعدادات والبيانات |
 |---|---|
 | Windows | `%LOCALAPPDATA%\Azkar Reminder` |
+| Windows MSIX | قد تعزل Windows الملفات في `%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Local\Azkar Reminder` |
 | macOS | `~/Library/Application Support/Azkar Reminder`؛ السجلات في `~/Library/Logs/Azkar Reminder` |
 | Linux | `$XDG_CONFIG_HOME/azkar-reminder` و`$XDG_DATA_HOME/azkar-reminder`، أو `~/.config/azkar-reminder` و`~/.local/share/azkar-reminder` عند عدم تعيينهما |
+
+نسخة MSIX قد تقرأ ملفات الإصدار غير المحزم أيضًا عبر العرض المدمج لمجلد AppData. إزالة حزمة MSIX تحذف بياناتها الخاصة؛ صدّر المكتبة المطلوبة قبل الإزالة. راجع [شرح Microsoft لعزل التطبيقات المحزمة](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes).
 
 تحتوي السجلات على أخطاء التشغيل وبعض مسارات الملفات. تُستخدم هوية تثبيت محلية في الذاكرة عند التحميل؛ لا يرسلها الكود الحالي إلى خادم. صدّر المكتبة إلى المكان الذي تختاره عند طلب نسخة احتياطية، وتحقق من ملفات السجل قبل مشاركتها للدعم.
 
@@ -25,6 +28,8 @@
 ## English
 
 Scheduling, reminder content and audio work without an internet connection. Settings, custom content and delivery history are stored locally as JSON and SQLite files at the paths above. The current source does not transmit those records to an external service and contains no telemetry service or advertising.
+
+MSIX can redirect new AppData files into a private package location while allowing reads from an existing unpackaged installation. Windows removes private package data when the package is uninstalled. Export any library you want to retain before removal.
 
 A user-requested Windows update check opens the project's GitHub releases page in the default browser. That browser makes the network request; GitHub may receive ordinary connection data. The Qt frontend currently has no update checker.
 

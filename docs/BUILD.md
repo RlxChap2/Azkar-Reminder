@@ -48,7 +48,9 @@ ctest --test-dir build -C Release --output-on-failure
 
 The native executable is `build/bin/Release/AzkarReminder.exe`; its audio directory is copied beside it. The installer is `release/AzkarReminder-Windows-Setup.exe`. `scripts/build_release.bat` automates the native build and installer. `verify_release.bat` checks files, not actual installation behavior.
 
-Optional Qt Windows builds require a matching Qt SDK and `BUILD_QT_APP=ON`. This optional combination has not been validated locally. MSIX packaging is available in `installer/msix`. Run `./installer/msix/build_msix.ps1` to rebuild and package with the registered Store identity. It reads the CMake version, rejects a mismatched binary and checks MakeAppx failures. It produces an unsigned MSIX by default. See [MSIX instructions](../installer/msix/README.md) for explicit certificate-based signing. Native MSVC build, 23 core tests and MakeAppx packaging were verified locally; installation and Store certification remain untested.
+Optional Qt Windows builds require a matching Qt SDK and `BUILD_QT_APP=ON`. Both frontends build and the core/audio/UI tests pass with Qt 6.8.3 on a Windows runner. MSIX packaging is available in `installer/msix`. Run `./installer/msix/build_msix.ps1` to rebuild and package with the registered Store identity. It reads the CMake version, rejects a mismatched binary and checks MakeAppx failures. It produces an unsigned MSIX by default. See [MSIX instructions](../installer/msix/README.md) for explicit certificate-based signing.
+
+`smoke_windows.ps1` and `smoke_windows_packages.ps1` require a disposable CI profile. They exercise native windows and IPC, Setup installation/reinstallation/removal, and a test-signed MSIX activated through its AUMID. The MSIX check asserts the process package identity and uses its private AppData fixtures. Test certificate trust is added and removed only in the throwaway runner; the distributable remains unsigned. Do not set `CI=true` to run these scripts against a working user profile. See [recorded validation](BUILD_VALIDATION.md).
 
 ## macOS
 
@@ -70,13 +72,15 @@ For a signed bundle, configure `MACOS_SIGNING_IDENTITY` and `MACOS_NOTARY_PROFIL
 - `MACOS_SIGNING_IDENTITY`, `MACOS_CERTIFICATE_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_KEYCHAIN_PASSWORD`.
 - `MACOS_APPLE_ID`, `MACOS_APPLE_TEAM_ID`, `MACOS_APP_PASSWORD`.
 
-The certificate must contain a Developer ID Application identity. The workflow stores a temporary notary profile, signs, requires notarization status `Accepted`, staples tickets, and removes the temporary keychain. Release tags fail when signing credentials are missing. Development branch artifacts may remain unsigned. No macOS build or notarization run has been performed in the local Windows session.
+The certificate must contain a Developer ID Application identity. The workflow stores a temporary notary profile, signs, requires notarization status `Accepted`, staples tickets, and removes the temporary keychain. Release tags fail when signing credentials are missing. Development branch artifacts use ad-hoc signing. Developer ID signing and notarization have not been executed with real credentials.
+
+On a disposable macOS CI profile, `bash scripts/smoke_macos.sh release/*.dmg` mounts the DMG read-only, copies and verifies the app, removes SDK plugin-path overrides, and exercises Cocoa startup, Launch Services, IPC and library recovery. On an ARM runner it also runs the deployed x86_64 slice through Rosetta. This does not replace an Intel hardware or Gatekeeper test.
 
 Before publishing, test Intel and Apple Silicon launch, Gatekeeper, startup after logout/login, audio, fullscreen Spaces, Retina and multiple displays on macOS. The current LaunchAgent startup adapter remains a compatibility implementation; a tested `SMAppService` migration is deferred.
 
 ## CI and versioning
 
-The workflow runs CTest on each host and tests Linux packaging in a container without Qt. Tag builds create a draft prerelease only after all required jobs pass. It has not been dispatched as part of this local repair.
+The workflow runs CTest on each host, builds the optional Windows Qt frontend and exercises distribution packages. Linux packaging is tested in a minimal container without Qt. Recorded runs and their limits are in [BUILD_VALIDATION.md](BUILD_VALIDATION.md). Tag builds create a draft prerelease only after all required jobs pass.
 
 Keep `project(... VERSION ...)`, Windows `DhikrReminder.rc` values and the Inno `AppVersion` synchronized. C++ and Qt display the CMake-provided `AZKAR_APP_VERSION`.
 
