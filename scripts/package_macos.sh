@@ -29,10 +29,10 @@ else
     codesign --verify --deep --strict "$app"
 fi
 binary="$app/Contents/MacOS/Azkar Reminder"
-lipo -verify_arch x86_64 arm64 "$binary"
+lipo "$binary" -verify_arch x86_64 arm64
 # Every bundled Qt framework must support both architectures too.
 while IFS= read -r framework; do
-    if file -b "$framework" | grep -q 'Mach-O'; then lipo -verify_arch x86_64 arm64 "$framework"; fi
+    if file -b "$framework" | grep -q 'Mach-O'; then lipo "$framework" -verify_arch x86_64 arm64; fi
 done < <(find "$app/Contents/Frameworks" "$app/Contents/PlugIns" -type f)
 suffix=Unsigned
 if [[ -n "${MACOS_SIGNING_IDENTITY:-}" ]]; then

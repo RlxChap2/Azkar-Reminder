@@ -24,7 +24,7 @@ ditto "$task_directory/mount/Azkar Reminder.app" "$task_directory/Azkar Reminder
 app="$task_directory/Azkar Reminder.app"
 binary="$app/Contents/MacOS/Azkar Reminder"
 codesign --verify --deep --strict "$app"
-lipo -verify_arch arm64 x86_64 "$binary"
+lipo "$binary" -verify_arch arm64 x86_64
 test -s "$app/Contents/Resources/audio/diode_matrix.mp3"
 test -s "$app/Contents/Resources/AzkarReminder.icns"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" == 'Azkar Reminder'
