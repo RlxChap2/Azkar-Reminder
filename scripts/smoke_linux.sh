@@ -19,7 +19,8 @@ start() {
     process=$!
     for attempt in {1..30}; do
         if ! kill -0 "$process" 2>/dev/null; then cat "$task_directory/application.log"; return 1; fi
-        if [[ -f "$XDG_DATA_HOME/azkar-reminder/content.json" ]] && "$application" "${arguments[@]}" --background; then return; fi
+        if [[ -f "$XDG_CONFIG_HOME/azkar-reminder/instance.lock" && "$(head -1 "$XDG_CONFIG_HOME/azkar-reminder/instance.lock")" == "$process" ]] &&
+            timeout 10 "$application" "${arguments[@]}" --background; then return; fi
         sleep 1
     done
     cat "$task_directory/application.log"

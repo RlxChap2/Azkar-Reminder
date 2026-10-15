@@ -41,7 +41,8 @@ start() {
     process=$!
     for attempt in {1..30}; do
         if ! kill -0 "$process" 2>/dev/null; then cat "$task_directory/application.log"; return 1; fi
-        if [[ -f "$config/content.json" ]] && "$binary" --background; then return; fi
+        if [[ -f "$config/instance.lock" && "$(head -1 "$config/instance.lock")" == "$process" ]] &&
+            /usr/bin/perl -e 'alarm 10; exec @ARGV or die "exec failed: $!";' "$binary" --background; then return; fi
         sleep 1
     done
     cat "$task_directory/application.log"

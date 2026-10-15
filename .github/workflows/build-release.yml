@@ -78,6 +78,7 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_QT_APP=ON -DBUILD_TESTING=ON
           cmake --build build --parallel 4
       - name: Run core, audio, UI and executable tests
+        timeout-minutes: 5
         run: |
           dbus-run-session -- ctest --test-dir build --output-on-failure
           dbus-run-session -- bash scripts/smoke_linux.sh build/azkar_reminder
