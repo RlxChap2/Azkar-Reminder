@@ -160,6 +160,7 @@ bool TestScheduler() {
         if (sched.GetState() != dhikr::ScheduleState::Paused) { sched.Stop(); return false; }
         sched.Resume();
         if (sched.IsPaused()) { sched.Stop(); return false; }
+        if (sched.GetState() == dhikr::ScheduleState::Paused) { sched.Stop(); return false; }
     }
 
     // TriggerNow must invoke the callback
