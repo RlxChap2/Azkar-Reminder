@@ -151,14 +151,16 @@ bool TestScheduler() {
     sched.Resume();
     if (sched.IsPaused()) { sched.Stop(); return false; }
 
-    // Pause for 15 minutes
-    sched.Pause(15);
-    if (!sched.IsPaused()) { sched.Stop(); return false; }
-    if (sched.GetState() != dhikr::ScheduleState::Paused) { sched.Stop(); return false; }
-
-    // Resume
-    sched.Resume();
-    if (sched.IsPaused()) { sched.Stop(); return false; }
+    // Let the worker race with repeated UI pause/resume requests. A stale
+    // settings snapshot must never publish Active after Pause has returned.
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        sched.Pause(15);
+        std::this_thread::yield();
+        if (!sched.IsPaused()) { sched.Stop(); return false; }
+        if (sched.GetState() != dhikr::ScheduleState::Paused) { sched.Stop(); return false; }
+        sched.Resume();
+        if (sched.IsPaused()) { sched.Stop(); return false; }
+    }
 
     // TriggerNow must invoke the callback
     sched.TriggerNow();

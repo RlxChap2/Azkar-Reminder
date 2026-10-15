@@ -274,7 +274,6 @@ time_t Scheduler::ComputeNextReminderTime() const {
     tm local{}; SafeLocalTime(&local, &now);
     auto state = ScheduleState::OutOfWindow;
     if (!settings.remindersEnabled) state = ScheduleState::Disabled;
-    else if (settings.paused && settings.pauseUntilUnix > now) state = ScheduleState::Paused;
     else if (IsQuietTime(settings, local)) state = ScheduleState::QuietHours;
     else {
         for (int offset = -1; offset <= 0; ++offset) {
@@ -283,7 +282,13 @@ time_t Scheduler::ComputeNextReminderTime() const {
             if (day.enabled && now >= start && now < end) { state = ScheduleState::Active; break; }
         }
     }
-    { std::lock_guard<std::mutex> lock(m_mutex); const_cast<Scheduler*>(this)->m_state = state; }
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        // Pause/Resume can run after the settings snapshot was taken. Publish
+        // the current pause state while holding the same lock as those calls.
+        if (settings.remindersEnabled && m_pauseUntil > now) state = ScheduleState::Paused;
+        const_cast<Scheduler*>(this)->m_state = state;
+    }
     return NextReminder(settings, now);
 }
 
