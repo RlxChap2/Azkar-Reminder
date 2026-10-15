@@ -101,6 +101,17 @@ try {
     $null = Start-Reminder
     Stop-Reminder
     if ((Get-Content -Raw -LiteralPath (Join-Path $data 'content.json')) -ne '[]') { throw 'Empty library was replaced.' }
+    if (!$PackageFullName) {
+        $startup = Start-Process -FilePath $Executable -ArgumentList '--setup-autostart' -PassThru
+        $clients.Add($startup)
+        if (!$startup.WaitForExit(15000) -or $startup.ExitCode -ne 0) { throw 'Startup registration client failed.' }
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        if ((Get-ItemPropertyValue -LiteralPath $runKey -Name AzkarReminder) -ne "`"$Executable`" --background") { throw 'Startup command does not reference this executable.' }
+        $removeStartup = Start-Process -FilePath $Executable -ArgumentList '--remove-autostart' -PassThru
+        $clients.Add($removeStartup)
+        if (!$removeStartup.WaitForExit(15000) -or $removeStartup.ExitCode -ne 0) { throw 'Startup removal client failed.' }
+        if (Get-ItemProperty -LiteralPath $runKey -Name AzkarReminder -ErrorAction SilentlyContinue) { throw 'Startup registration was not removed.' }
+    }
     Write-Host 'PASS: native window, background startup, single instance, IPC show/quit and empty library.'
 } catch {
     if ($process) { $process | Select-Object Id, SessionId, Responding, MainWindowTitle | Format-List | Out-Host }
