@@ -12,7 +12,6 @@ if [[ -e "$config" && -n "$(find "$config" -type f -print -quit)" ]]; then
     exit 1
 fi
 process=
-launch_prefix=()
 mounted=false
 cleanup() {
     if [[ -n "$process" ]]; then kill -KILL "$process" 2>/dev/null || true; wait "$process" 2>/dev/null || true; fi
@@ -26,13 +25,14 @@ mounted=true
 ditto "$task_directory/mount/Azkar Reminder.app" "$task_directory/Azkar Reminder.app"
 app="$task_directory/Azkar Reminder.app"
 binary="$app/Contents/MacOS/Azkar Reminder"
+launch=("$binary")
 codesign --verify --deep --strict "$app"
 lipo "$binary" -verify_arch arm64 x86_64
 test -s "$app/Contents/Resources/audio/diode_matrix.mp3"
 test -s "$app/Contents/Resources/AzkarReminder.icns"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" == 'Azkar Reminder'
 start() {
-    "${launch_prefix[@]}" "$binary" --background > "$task_directory/application.log" 2>&1 &
+    "${launch[@]}" --background > "$task_directory/application.log" 2>&1 &
     process=$!
     for attempt in {1..30}; do
         if ! kill -0 "$process" 2>/dev/null; then cat "$task_directory/application.log"; return 1; fi
@@ -74,7 +74,7 @@ backup=$(find "$config" -name 'settings-invalid-*.json' -print -quit)
 [[ -n "$backup" && "$(cat "$backup")" == '{invalid-settings' ]]
 if [[ "$(uname -m)" == arm64 ]]; then
     arch -x86_64 /usr/bin/true
-    launch_prefix=(arch -x86_64)
+    launch=(arch -x86_64 "$binary")
     start
     stop
     echo 'PASS: deployed x86_64 slice executes under Rosetta on the ARM host.'
