@@ -30,7 +30,8 @@ interface IAzkarActivationManager {
 class AzkarActivationManager { }
 public static class AzkarSmokeWindow {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
-    public static extern IntPtr FindWindow(string className, string title);
+    private static extern IntPtr FindWindow(string className, string title);
+    public static IntPtr MainWindow() { return FindWindow("DhikrMain", null); }
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll")]
@@ -71,7 +72,7 @@ function Start-Reminder {
     }
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         if ($script:process.HasExited) { throw "Application exited: $($script:process.ExitCode)" }
-        $window = [AzkarSmokeWindow]::FindWindow('DhikrMain', $null)
+        $window = [AzkarSmokeWindow]::MainWindow()
         [uint32]$ownerId = 0
         [void][AzkarSmokeWindow]::GetWindowThreadProcessId($window, [ref]$ownerId)
         if ($window -ne [IntPtr]::Zero -and $ownerId -eq $script:process.Id) { return $window }
