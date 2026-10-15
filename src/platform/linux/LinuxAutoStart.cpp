@@ -60,10 +60,15 @@ bool LinuxAutoStart::SetAutoStartEnabled(bool enable, const std::filesystem::pat
     // Determine binary execution path
     std::filesystem::path execPath = appPath;
     if (execPath.empty()) {
-        try {
-            execPath = std::filesystem::canonical("/proc/self/exe");
-        } catch (...) {
-            execPath = "/usr/bin/azkar-reminder";
+        const char* appimageEnv = std::getenv("APPIMAGE");
+        if (appimageEnv && *appimageEnv) {
+            execPath = appimageEnv;
+        } else {
+            try {
+                execPath = std::filesystem::canonical("/proc/self/exe");
+            } catch (...) {
+                execPath = "/usr/bin/azkar-reminder";
+            }
         }
     }
 

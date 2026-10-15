@@ -48,7 +48,7 @@ jobs:
         path: release/*.exe
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 2. LINUX BUILD (Qt 6 + AppImage with bundled Qt libraries)
+  # 2. LINUX BUILD (Qt 6 + AppImage with complete bundled Qt libraries)
   # ─────────────────────────────────────────────────────────────────────────────
   build-linux:
     name: Linux (x86_64 AppImage)
@@ -66,23 +66,28 @@ jobs:
           ninja-build \
           qt6-base-dev \
           qt6-base-dev-tools \
+          qt6-qpa-plugins \
           qt6-wayland \
           libgl1-mesa-dev \
           libasound2-dev \
           libpulse-dev \
           libx11-dev \
-          libxcb-xinerama0-dev \
-          libxcb-icccm4-dev \
-          libxcb-image0-dev \
-          libxcb-keysyms1-dev \
-          libxcb-randr0-dev \
-          libxcb-render-util0-dev \
-          libxcb-shape0-dev \
-          libxcb-xfixes0-dev \
-          libxkbcommon-dev \
-          libxkbcommon-x11-dev \
-          fuse \
-          file
+          libxcb-cursor0 \
+          libxcb-icccm4 \
+          libxcb-image0 \
+          libxcb-keysyms1 \
+          libxcb-randr0 \
+          libxcb-render-util0 \
+          libxcb-shape0 \
+          libxcb-sync1 \
+          libxcb-xfixes0 \
+          libxcb-xinerama0 \
+          libxcb-xkb1 \
+          libxkbcommon0 \
+          libxkbcommon-x11-0 \
+          libicu70 \
+          file \
+          patchelf
 
     - name: Configure CMake
       run: |
@@ -96,11 +101,14 @@ jobs:
     - name: Run Core Unit Tests
       run: ./build/azkar_core_tests
 
-    - name: Package AppImage with bundled Qt (linuxdeployqt)
+    - name: Package AppImage with bundled Qt
       run: |
         # ── 1. Prepare AppDir structure ───────────────────────────────────────
         mkdir -p AppDir/usr/bin
         mkdir -p AppDir/usr/lib
+        mkdir -p AppDir/usr/plugins/platforms
+        mkdir -p AppDir/usr/plugins/imageformats
+        mkdir -p AppDir/usr/plugins/platforminputcontexts
         mkdir -p AppDir/usr/share/applications
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         mkdir -p AppDir/usr/share/azkar-reminder/audio
@@ -118,41 +126,45 @@ jobs:
           cp assets/images/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/azkar-reminder.png
         fi
 
-        # ── 2. Desktop entry (required by linuxdeployqt) ──────────────────────
+        # ── 2. Desktop entry ──────────────────────────────────────────────────
         printf '[Desktop Entry]\nType=Application\nName=Azkar Reminder\nExec=azkar_reminder\nIcon=azkar-reminder\nCategories=Utility;Clock;Qt;\nTerminal=false\n' > AppDir/usr/share/applications/azkar-reminder.desktop
         cp AppDir/usr/share/applications/azkar-reminder.desktop AppDir/azkar-reminder.desktop
 
-        # ── 3. Download linuxdeployqt ─────────────────────────────────────────
-        echo "Downloading linuxdeployqt..."
-        wget -q "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage" \
-          -O linuxdeployqt
-        chmod +x linuxdeployqt
+        # ── 3. Copy Qt6 shared libraries and all core dependencies ────────────
+        QT_LIB_DIR="/usr/lib/x86_64-linux-gnu"
+        echo "Copying Qt6 core libraries from $QT_LIB_DIR..."
+        for lib in libQt6Core libQt6Gui libQt6Widgets libQt6DBus libQt6XcbQpa libQt6Network libQt6OpenGL libQt6WaylandClient; do
+          find "$QT_LIB_DIR" -maxdepth 1 -name "${lib}.so*" -exec cp -Pv {} AppDir/usr/lib/ \; 2>/dev/null || true
+        done
 
-        # ── 4. Run linuxdeployqt to bundle Qt libraries ───────────────────────
-        export QMAKE=$(which qmake6 2>/dev/null || which qmake)
-        echo "Using qmake at: $QMAKE"
+        echo "Copying ICU and supporting libraries..."
+        for lib in libicuuc libicui18n libicudata libxkbcommon libxkbcommon-x11 libxcb-cursor libxcb-icccm libxcb-image libxcb-keysyms libxcb-randr libxcb-render-util libxcb-shape libxcb-sync libxcb-xfixes libxcb-xinerama libxcb-xkb; do
+          find "$QT_LIB_DIR" -maxdepth 1 -name "${lib}.so*" -exec cp -Pv {} AppDir/usr/lib/ \; 2>/dev/null || true
+        done
 
-        ./linuxdeployqt --appimage-extract-and-run \
-          AppDir/usr/share/applications/azkar-reminder.desktop \
-          -qmake="$QMAKE" \
-          -bundle-non-qt-libs \
-          -no-strip \
-          -verbose=1 \
-          -unsupported-allow-new-glibc || {
-            echo "WARNING: linuxdeployqt returned non-zero — falling back to manual Qt copy"
-            QT_LIB_DIR=$(dirname "$(find /usr/lib -name 'libQt6Core.so*' 2>/dev/null | head -1)")
-            echo "Qt lib dir: $QT_LIB_DIR"
-            for lib in libQt6Core libQt6Gui libQt6Widgets libQt6DBus libQt6XcbQpa libQt6Network; do
-              find "$QT_LIB_DIR" -name "${lib}.so*" -exec cp -Pv {} AppDir/usr/lib/ \; 2>/dev/null || true
-            done
-            QT_PLUGINS_DIR=$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || echo "/usr/lib/x86_64-linux-gnu/qt6/plugins")
-            mkdir -p AppDir/usr/plugins/platforms AppDir/usr/plugins/imageformats
-            cp -rv "$QT_PLUGINS_DIR/platforms"/*.so    AppDir/usr/plugins/platforms/    2>/dev/null || true
-            cp -rv "$QT_PLUGINS_DIR/imageformats"/*.so AppDir/usr/plugins/imageformats/ 2>/dev/null || true
-          }
+        echo "Copying Qt plugins..."
+        QT_PLUGINS_DIR="/usr/lib/x86_64-linux-gnu/qt6/plugins"
+        cp -rv "$QT_PLUGINS_DIR/platforms"/*.so AppDir/usr/plugins/platforms/ 2>/dev/null || true
+        cp -rv "$QT_PLUGINS_DIR/imageformats"/*.so AppDir/usr/plugins/imageformats/ 2>/dev/null || true
+        cp -rv "$QT_PLUGINS_DIR/platforminputcontexts"/*.so AppDir/usr/plugins/platforminputcontexts/ 2>/dev/null || true
+        if [ -d "$QT_PLUGINS_DIR/xcbglintegrations" ]; then
+          mkdir -p AppDir/usr/plugins/xcbglintegrations
+          cp -rv "$QT_PLUGINS_DIR/xcbglintegrations"/*.so AppDir/usr/plugins/xcbglintegrations/ 2>/dev/null || true
+        fi
+
+        # Verify libqxcb.so exists (critical for X11 Linux!)
+        if [ ! -f "AppDir/usr/plugins/platforms/libqxcb.so" ]; then
+          echo "ERROR: libqxcb.so not found in AppDir/usr/plugins/platforms!"
+          find /usr/lib -name "libqxcb.so" 2>/dev/null
+          exit 1
+        fi
+        echo "libqxcb.so verified successfully!"
+
+        # ── 4. Create qt.conf ─────────────────────────────────────────────────
+        printf '[Paths]\nPrefix = ..\nPlugins = plugins\nLibraries = lib\n' > AppDir/usr/bin/qt.conf
 
         # ── 5. AppRun launcher ────────────────────────────────────────────────
-        printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"\nexport QT_PLUGIN_PATH="${HERE}/usr/plugins:${HERE}/usr/lib/qt6/plugins"\nexport XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"\nexport PATH="${HERE}/usr/bin:${PATH}"\nexec "${HERE}/usr/bin/azkar_reminder" "$@"\n' > AppDir/AppRun
+        printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "${0}")")"\nexport LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"\nexport QT_PLUGIN_PATH="${HERE}/usr/plugins"\nexport QT_QPA_PLATFORM_PLUGIN_PATH="${HERE}/usr/plugins/platforms"\nexport XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"\nexport PATH="${HERE}/usr/bin:${PATH}"\nexec "${HERE}/usr/bin/azkar_reminder" "$@"\n' > AppDir/AppRun
         chmod +x AppDir/AppRun
 
         # ── 6. Pack into AppImage ─────────────────────────────────────────────
@@ -263,24 +275,48 @@ jobs:
 
         # ── 4. Deploy Qt dependencies into bundle ─────────────────────────────
         echo "Running macdeployqt on: ${APP_PATH}"
-        macdeployqt "${APP_PATH}" -verbose=2
-        echo "macdeployqt completed successfully"
+        macdeployqt "${APP_PATH}" -verbose=1
 
-        # ── 5. Ad-hoc Code Sign (prevents 'damaged and can't be opened' error) ─
+        # Copy any transitive Homebrew dylibs that macdeployqt may have missed
+        for dylib in libbrotlicommon libbrotlidec libsharpyuv libwebp libwebpdemux libwebpmux; do
+          find /opt/homebrew/lib -name "${dylib}*.dylib" -exec cp -f {} "${APP_PATH}/Contents/Frameworks/" \; 2>/dev/null || true
+        done
+
+        # Fix rpath for all dylibs in Frameworks
+        find "${APP_PATH}/Contents/Frameworks" -type f \( -name "*.dylib" -o -name "*.so" \) | while read -r lib; do
+          install_name_tool -id "@rpath/$(basename "$lib")" "$lib" 2>/dev/null || true
+        done
+        install_name_tool -add_rpath "@executable_path/../Frameworks" "${APP_PATH}/Contents/MacOS/Azkar Reminder" 2>/dev/null || true
+
+        # Clean extended attributes
+        xattr -cr "${APP_PATH}" 2>/dev/null || true
+
+        # ── 5. Ad-hoc Code Sign inside-out with entitlements ──────────────────
         echo "Ad-hoc signing all dylibs and frameworks..."
         find "${APP_PATH}/Contents/Frameworks" -type f \( -name "*.dylib" -o -name "*.so" \) \
-          -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+          -exec codesign --force --sign - {} \; 2>/dev/null || true
         find "${APP_PATH}/Contents/Frameworks" -type d -name "*.framework" \
-          -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
+          -exec codesign --force --sign - {} \; 2>/dev/null || true
         find "${APP_PATH}/Contents/PlugIns" -type f \( -name "*.dylib" -o -name "*.so" \) \
-          -exec codesign --force --verify --verbose --sign - {} \; 2>/dev/null || true
-        codesign --force --deep --verify --verbose --sign - "${APP_PATH}"
+          -exec codesign --force --sign - {} \; 2>/dev/null || true
+        
+        ENTITLEMENTS_FLAG=""
+        if [ -f "assets/entitlements.plist" ]; then
+          ENTITLEMENTS_FLAG="--entitlements assets/entitlements.plist"
+        fi
+
+        codesign --force --options runtime ${ENTITLEMENTS_FLAG} --sign - "${APP_PATH}/Contents/MacOS/Azkar Reminder"
+        codesign --force --deep --options runtime ${ENTITLEMENTS_FLAG} --sign - "${APP_PATH}"
         echo "Code signing complete"
 
-        # ── 6. Build DMG with /Applications symlink ───────────────────────────
+        # ── 6. Build DMG with /Applications symlink & One-Click Fix Script ────
         mkdir -p dmg_staging
         cp -R "${APP_PATH}" "dmg_staging/Azkar Reminder.app"
         ln -s /Applications dmg_staging/Applications
+
+        # Helper script inside DMG to remove quarantine with a single double-click
+        printf '#!/bin/bash\nDIR="$(cd "$(dirname "$0")" && pwd)"\necho "Removing macOS quarantine for Azkar Reminder..."\nxattr -cr "/Applications/Azkar Reminder.app" 2>/dev/null || xattr -cr "$DIR/Azkar Reminder.app" 2>/dev/null\necho "Done! Opening Azkar Reminder..."\nopen "/Applications/Azkar Reminder.app" 2>/dev/null || open "$DIR/Azkar Reminder.app" 2>/dev/null\n' > "dmg_staging/Fix-Permissions.command"
+        chmod +x "dmg_staging/Fix-Permissions.command"
 
         hdiutil create \
           -volname "Azkar Reminder" \
@@ -316,7 +352,7 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        draft: true
+        draft: false
         prerelease: false
         name: "Azkar Reminder ${{ github.ref_name }}"
         body: |
@@ -328,55 +364,49 @@ jobs:
 
           | Platform | File | Size |
           |----------|------|------|
-          | 🪟 **Windows** (10/11) | `AzkarReminderSetup.exe` | ~38 MB |
+          | 🪟 **Windows** (10/11) | `AzkarReminder-Windows-Setup.exe` | ~16 MB |
           | 🐧 **Linux** (Ubuntu, Fedora, Arch, etc.) | `AzkarReminder-x86_64.AppImage` | ~60 MB |
           | 🍎 **macOS** (Apple Silicon & Intel, macOS 11+) | `AzkarReminder-macOS.dmg` | ~38 MB |
 
           ---
 
-          ### 🍎 macOS — خطوات التثبيت
+          ### 🍎 macOS — خطوات التثبيت وتشغيل التطبيق
 
-          > ⚠️ **مهم**: macOS يحتاج خطوة إضافية بعد التحميل بسبب نظام الحماية Gatekeeper
+          > ⚠️ **مهم**: macOS يضع ملفات التحميل في وضع الحجر الصحي (Gatekeeper Quarantine). لتشغيل التطبيق بسهولة:
 
-          1. حمّل `AzkarReminder-macOS.dmg`
-          2. افتح الـ DMG واسحب `Azkar Reminder.app` لـ `/Applications`
-          3. **لا تفتح التطبيق مباشرة بعد التثبيت** — بدل كده افتح **Terminal** واكتب:
+          **الطريقة الأولى (الأسل والأسرع):**
+          1. افتح ملف `AzkarReminder-macOS.dmg`.
+          2. اسحب `Azkar Reminder.app` إلى مجلد `Applications`.
+          3. اضغط مرتين على ملف **`Fix-Permissions.command`** الموجود داخل الـ DMG نفسه لإزالة الحظر وفتح التطبيق فوراً.
 
+          **الطريقة الثانية (عبر الـ Terminal):**
+          افتح الـ Terminal ونفذ الأمر التالي:
           ```bash
-          xattr -dr com.apple.quarantine "/Applications/Azkar Reminder.app"
+          xattr -cr "/Applications/Azkar Reminder.app"
           ```
-
-          4. دلوقتي افتح التطبيق عادي من Launchpad أو `/Applications`
-
-          > **بديل**: لو ظهرت رسالة "damaged and can't be opened":
-          > اضغط **Cancel**، روح لـ **System Settings → Privacy & Security** وانزل لـ "Security" وهتلاقي زرار **Open Anyway**
+          ثم افتح التطبيق من Launchpad أو مجلد التطبيقات.
 
           ---
 
           ### 🐧 Linux — خطوات التثبيت
 
-          1. حمّل `AzkarReminder-x86_64.AppImage`
-          2. خلّيه executable:
+          1. حمّل `AzkarReminder-x86_64.AppImage`.
+          2. اجعل الملف قابلاً للتشغيل:
           ```bash
           chmod +x AzkarReminder-x86_64.AppImage
           ```
-          3. شغّله:
+          3. شغّل التطبيق:
           ```bash
           ./AzkarReminder-x86_64.AppImage
-          ```
-
-          > **ملاحظة**: لو ظهر error عن FUSE:
-          ```bash
-          ./AzkarReminder-x86_64.AppImage --appimage-extract-and-run
           ```
 
           ---
 
           ### 🪟 Windows — خطوات التثبيت
 
-          1. حمّل `AzkarReminderSetup.exe`
-          2. شغّل الـ installer وابع التعليمات
-          3. البرنامج هيشتغل في system tray تلقائياً
+          1. حمّل `AzkarReminder-Windows-Setup.exe`.
+          2. شغّل المثبت واتبع الخطوات البسيطة.
+          3. سيعمل التطبيق في شريط المهام (System Tray) تلقائياً.
         files: |
           AzkarReminder-Windows-Setup/*
           AzkarReminder-Linux-AppImage/*
