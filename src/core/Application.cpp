@@ -66,6 +66,7 @@ bool Application::Initialize(HINSTANCE hInstance) {
         LOG_WARN("Malformed settings backed up; defaults are active");
         if (!Settings::Instance().Save()) LOG_WARN("Default settings could not be persisted");
     }
+    m_settingsReady = true;
     std::wstring lang = Settings::Instance().GetCopy().language;
     if (lang == L"system") {
         lang = (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_ARABIC) ? L"ar" : L"en";
@@ -251,7 +252,7 @@ void Application::Shutdown() {
     Database::Instance().Checkpoint();
     Database::Instance().Close();
 
-    Settings::Instance().Save();
+    if (m_settingsReady) Settings::Instance().Save();
 
     if (m_dwriteFactory) { m_dwriteFactory->Release(); m_dwriteFactory = nullptr; }
     if (m_d2dFactory)    { m_d2dFactory->Release();    m_d2dFactory    = nullptr; }
