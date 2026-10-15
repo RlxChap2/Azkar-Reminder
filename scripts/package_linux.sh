@@ -49,7 +49,10 @@ for directory in wayland-decoration-client wayland-graphics-integration-client w
     test -d "$qt_plugins/$directory"
     cp -a "$qt_plugins/$directory" "$stage/usr/plugins/"
 done
-"$tools/linuxdeploy-x86_64.AppImage" --appdir "$stage" --plugin qt
+# linuxdeploy excludes HarfBuzz as a presumed system library. Minimal desktop
+# installations need it bundled for Qt text shaping, including Arabic.
+"$tools/linuxdeploy-x86_64.AppImage" --appdir "$stage" --plugin qt \
+    --library /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0
 # Include Debian copyright notices for libraries copied from the build host.
 for library in "$stage"/usr/lib/*.so*; do
     system_file=$(readlink -f "/usr/lib/x86_64-linux-gnu/${library##*/}")
