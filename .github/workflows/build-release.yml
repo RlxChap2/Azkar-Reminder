@@ -291,7 +291,7 @@ jobs:
         # Clean extended attributes
         xattr -cr "${APP_PATH}" 2>/dev/null || true
 
-        # ── 5. Ad-hoc Code Sign inside-out with entitlements ──────────────────
+        # ── 5. Ad-hoc Code Sign inside-out (no --options runtime to avoid Notarization demand) ─
         echo "Ad-hoc signing all dylibs and frameworks..."
         find "${APP_PATH}/Contents/Frameworks" -type f \( -name "*.dylib" -o -name "*.so" \) \
           -exec codesign --force --sign - {} \; 2>/dev/null || true
@@ -300,13 +300,9 @@ jobs:
         find "${APP_PATH}/Contents/PlugIns" -type f \( -name "*.dylib" -o -name "*.so" \) \
           -exec codesign --force --sign - {} \; 2>/dev/null || true
         
-        ENTITLEMENTS_FLAG=""
-        if [ -f "assets/entitlements.plist" ]; then
-          ENTITLEMENTS_FLAG="--entitlements assets/entitlements.plist"
-        fi
-
-        codesign --force --options runtime ${ENTITLEMENTS_FLAG} --sign - "${APP_PATH}/Contents/MacOS/Azkar Reminder"
-        codesign --force --deep --options runtime ${ENTITLEMENTS_FLAG} --sign - "${APP_PATH}"
+        codesign --force --sign - "${APP_PATH}/Contents/MacOS/Azkar Reminder"
+        codesign --force --deep --sign - "${APP_PATH}"
+        codesign --verify --deep --strict --verbose=2 "${APP_PATH}" || true
         echo "Code signing complete"
 
         # ── 6. Build DMG with /Applications symlink & One-Click Fix Script ────
