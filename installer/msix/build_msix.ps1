@@ -2,9 +2,9 @@
 [CmdletBinding()]
 param (
     [string]$Version = "1.2.4",
-    [string]$Publisher = "CN=Ahmed Mohamed Kamel",
+    [string]$Publisher = "CN=BD257909-6037-4C23-A6F3-A71B4BD2AF69",
     [string]$PublisherDisplayName = "Ahmedkamel",
-    [string]$PackageName = "AhmedMohamedKamel.AzkarReminder",
+    [string]$PackageName = "15145Ahmedkamel.AzkarReminder",
     [switch]$SignForLocalTest = $true
 )
 
