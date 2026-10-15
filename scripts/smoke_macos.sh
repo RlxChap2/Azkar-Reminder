@@ -2,6 +2,8 @@
 set -euo pipefail
 # Run only on a disposable macOS runner; never replace an existing library.
 [[ "${CI:-}" == true ]] || { echo 'Requires a disposable CI profile.' >&2; exit 1; }
+# The deployed app must use its own plugins rather than install-qt-action's SDK.
+unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH QML_IMPORT_PATH DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
 image=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 task_directory=$(mktemp -d)
 config="$HOME/Library/Application Support/Azkar Reminder"
@@ -10,6 +12,7 @@ if [[ -e "$config" && -n "$(find "$config" -type f -print -quit)" ]]; then
     exit 1
 fi
 process=
+launch_prefix=()
 mounted=false
 cleanup() {
     if [[ -n "$process" ]]; then kill -KILL "$process" 2>/dev/null || true; wait "$process" 2>/dev/null || true; fi
@@ -29,7 +32,7 @@ test -s "$app/Contents/Resources/audio/diode_matrix.mp3"
 test -s "$app/Contents/Resources/AzkarReminder.icns"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" == 'Azkar Reminder'
 start() {
-    "$binary" --background > "$task_directory/application.log" 2>&1 &
+    "${launch_prefix[@]}" "$binary" --background > "$task_directory/application.log" 2>&1 &
     process=$!
     for attempt in {1..30}; do
         if ! kill -0 "$process" 2>/dev/null; then cat "$task_directory/application.log"; return 1; fi
@@ -69,4 +72,11 @@ start
 stop
 backup=$(find "$config" -name 'settings-invalid-*.json' -print -quit)
 [[ -n "$backup" && "$(cat "$backup")" == '{invalid-settings' ]]
+if [[ "$(uname -m)" == arm64 ]]; then
+    arch -x86_64 /usr/bin/true
+    launch_prefix=(arch -x86_64)
+    start
+    stop
+    echo 'PASS: deployed x86_64 slice executes under Rosetta on the ARM host.'
+fi
 echo 'PASS: DMG mount, deployed Cocoa app, Launch Services, single instance, IPC quit and library recovery.'
