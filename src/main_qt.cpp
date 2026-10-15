@@ -80,14 +80,18 @@ int main(int argc, char* argv[]) {
     QObject::connect(&server, &QLocalServer::newConnection, &window, [&] {
         while (server.hasPendingConnections()) {
             auto* socket = server.nextPendingConnection();
-            QObject::connect(socket, &QLocalSocket::readyRead, &window, [socket, &window] {
+            const auto readRequest = [socket, &window] {
                 if (!socket->canReadLine()) return;
                 const auto request = socket->readLine().trimmed();
                 if (request == "quit") QApplication::quit();
                 else if (request == "show") { window.showNormal(); window.raise(); window.activateWindow(); }
                 socket->disconnectFromServer();
-            });
+            };
+            QObject::connect(socket, &QLocalSocket::readyRead, &window, readRequest);
             QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+            // A fast client can send its request before newConnection is handled.
+            // readyRead is not emitted again for bytes already in the buffer.
+            if (socket->canReadLine()) readRequest();
         }
     });
     tray.Show();
