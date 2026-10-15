@@ -101,6 +101,13 @@ try {
     Stop-Reminder
     if ((Get-Content -Raw -LiteralPath (Join-Path $data 'content.json')) -ne '[]') { throw 'Empty library was replaced.' }
     Write-Host 'PASS: native window, background startup, single instance, IPC show/quit and empty library.'
+} catch {
+    if ($process) { $process | Select-Object Id, SessionId, Responding, MainWindowTitle | Format-List | Out-Host }
+    Get-ChildItem -LiteralPath (Join-Path $data 'logs') -File -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "Application log: $($_.Name)"
+        Get-Content -LiteralPath $_.FullName -Tail 40 | Out-Host
+    }
+    throw
 } finally {
     foreach ($client in $clients) { if (!$client.HasExited) { Stop-Process -Id $client.Id -Force } }
     if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force }
