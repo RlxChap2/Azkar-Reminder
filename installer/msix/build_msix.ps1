@@ -3,7 +3,7 @@
 param (
     [string]$Version = "1.2.4",
     [string]$Publisher = "CN=Ahmed Mohamed Kamel",
-    [string]$PublisherDisplayName = "Ahmed Mohamed Kamel",
+    [string]$PublisherDisplayName = "Ahmedkamel",
     [string]$PackageName = "AhmedMohamedKamel.AzkarReminder",
     [switch]$SignForLocalTest = $true
 )
