@@ -9,8 +9,8 @@ config="$HOME/Library/Application Support/Azkar Reminder"
 process=
 mounted=false
 cleanup() {
-    if [[ -n "$process" ]]; then kill "$process" 2>/dev/null || true; wait "$process" 2>/dev/null || true; fi
-    if [[ "$mounted" == true ]]; then hdiutil detach "$task_directory/mount" >/dev/null; fi
+    if [[ -n "$process" ]]; then kill -KILL "$process" 2>/dev/null || true; wait "$process" 2>/dev/null || true; fi
+    if [[ "$mounted" == true ]]; then hdiutil detach "$task_directory/mount" >/dev/null || hdiutil detach -force "$task_directory/mount" >/dev/null || true; fi
     rm -rf "$task_directory"
 }
 trap cleanup EXIT

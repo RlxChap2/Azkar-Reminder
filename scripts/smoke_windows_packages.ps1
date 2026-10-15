@@ -60,7 +60,7 @@ try {
     if (!$installedPackage) { throw 'MSIX was not registered.' }
     $packageExecutable = Join-Path $installedPackage.InstallLocation 'AzkarReminder.exe'
     if ((Get-FileHash -LiteralPath $packageExecutable).Hash -ne $referenceHash) { throw 'MSIX contains a stale binary.' }
-    & "$PSScriptRoot/smoke_windows.ps1" -Executable $packageExecutable
+    & "$PSScriptRoot/smoke_windows.ps1" -Executable $packageExecutable -PackageFullName $installedPackage.PackageFullName -PackageFamilyName $installedPackage.PackageFamilyName
     Write-Host 'PASS: MSIX test signing, checksum, installation and installed executable.'
 } finally {
     try {
